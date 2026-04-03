@@ -2,7 +2,6 @@
 #include <fat.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 int main(int argc, char *argv[]) {
     fatInitDefault();
@@ -30,9 +29,9 @@ int main(int argc, char *argv[]) {
     fprintf(f, "DSI_MODE = 0\n");
     fclose(f);
 
-    const char *bsPath = "fat:/_nds/nds-bootstrap-release.nds";
-    char *bsArgs[] = { (char *)bsPath, NULL };
-    execv(bsPath, bsArgs);
+    // nds-bootstrap 실행
+    char *args[] = { "fat:/_nds/nds-bootstrap-release.nds", NULL };
+    ndsBootstrap("fat:/_nds/nds-bootstrap-release.nds", args);
 
-    return 1;
+    return 0;
 }
