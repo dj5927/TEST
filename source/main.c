@@ -29,9 +29,9 @@ int main(int argc, char *argv[]) {
     fprintf(f, "DSI_MODE = 0\n");
     fclose(f);
 
-    // nds-bootstrap 실행
-    char *args[] = { "fat:/_nds/nds-bootstrap-release.nds", NULL };
-    ndsBootstrap("fat:/_nds/nds-bootstrap-release.nds", args);
+    // ini 쓴 후 nds-bootstrap 실행
+    // dldi_tryPatch 후 소프트리셋으로 부트
+    swiSoftReset();
 
     return 0;
 }
