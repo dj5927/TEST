@@ -1,0 +1,31 @@
+name: Build NDS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup devkitARM
+      uses: devkitPro/action-setup@v1
+      with:
+        packages: nds-dev
+
+    - name: Build
+      run: |
+        export DEVKITARM=/opt/devkitpro/devkitARM
+        export DEVKITPRO=/opt/devkitpro
+        make
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: nds-ini-writer
+        path: nds-ini-writer.nds
