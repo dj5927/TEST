@@ -29,9 +29,5 @@ int main(int argc, char *argv[]) {
     fprintf(f, "DSI_MODE = 0\n");
     fclose(f);
 
-    // ini 쓴 후 nds-bootstrap 실행
-    // dldi_tryPatch 후 소프트리셋으로 부트
-    swiSoftReset();
-
     return 0;
 }
