@@ -8,17 +8,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm:latest
 
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-
-    - name: Install devkitARM
-      run: |
-        wget https://apt.devkitpro.org/install-devkitpro-pacman
-        chmod +x install-devkitpro-pacman
-        sudo ./install-devkitpro-pacman
-        sudo dkp-pacman -Sy --noconfirm nds-dev
 
     - name: Build
       run: |
