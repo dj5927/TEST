@@ -1,3 +1,4 @@
+cat > .github/workflows/build.yml << 'EOF'
 name: Build NDS
 
 on:
@@ -13,15 +14,18 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup devkitARM
-      uses: devkitPro/action-setup@v1
-      with:
-        packages: nds-dev
+    - name: Install devkitARM
+      run: |
+        wget https://apt.devkitpro.org/install-devkitpro-pacman
+        chmod +x install-devkitpro-pacman
+        sudo ./install-devkitpro-pacman
+        sudo dkp-pacman -Sy --noconfirm nds-dev
 
     - name: Build
       run: |
         export DEVKITARM=/opt/devkitpro/devkitARM
         export DEVKITPRO=/opt/devkitpro
+        export PATH=$DEVKITARM/bin:$PATH
         make
 
     - name: Upload artifact
@@ -29,3 +33,8 @@ jobs:
       with:
         name: nds-ini-writer
         path: nds-ini-writer.nds
+EOF
+
+git add .
+git commit -m "fix devkitpro install"
+git push
