@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <string>
 
 namespace bd {
@@ -46,6 +47,10 @@ int RendererCount();
 const char *RendererName(int renderer);
 int CurrentRenderer();
 bool ApplyRenderer(int renderer);
+
+// The executable a restart should start so the chosen backend is the one that
+// comes back: the sibling built for it, or empty when that is this executable.
+std::filesystem::path RendererRestartTarget();
 
 const char *SettingsPageLabel(SettingsPage page);
 

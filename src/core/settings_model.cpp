@@ -498,13 +498,13 @@ int NextEnabledOption(const SettingRow &s, int cur, int dir) {
   return cur;
 }
 
-// A menu row reads its value every frame, so the record is read once and the
-// row's own writes keep this current.
+// The backend on screen, seeded from the running executable rather than the
+// record: the record names what a shortcut or the installer should start, so
+// reading the row from it made the row disagree with the renderer in use.
+// A menu row reads its value every frame, so the row's own writes keep this
+// current.
 installer::Renderer &RendererState() {
-  static installer::Renderer state = [] {
-    auto cfg = installer::ReadInstallRegistry();
-    return cfg ? cfg->renderer : installer::Renderer::D3D12;
-  }();
+  static installer::Renderer state = installer::kBuiltRenderer;
   return state;
 }
 
@@ -544,6 +544,9 @@ bool ApplyRenderer(int renderer) {
   if (wanted == RendererState())
     return true;
 
+  // Nothing consults this to pick the running backend any more. It names the
+  // executable a shortcut and the installer should start, which is what makes
+  // the choice outlive this session.
   auto cfg = installer::ReadInstallRegistry();
   if (!cfg) {
     BD_WARN("[backend] no install record, renderer choice not saved");
@@ -552,8 +555,40 @@ bool ApplyRenderer(int renderer) {
   cfg->renderer = wanted;
   if (!installer::WriteInstallRegistry(*cfg))
     return false;
+
+#if defined(_WIN32)
+  // Left alone, the shortcut keeps starting the other backend and the choice
+  // reverts on the next cold start.
+  std::string shortcut_error;
+  if (!platform::RetargetDesktopShortcut(
+          cfg->install_root / installer::RendererExecutable(wanted), "re:Blue",
+          shortcut_error))
+    BD_WARN("[backend] desktop shortcut not repointed: {}", shortcut_error);
+#endif
+
   RendererState() = wanted;
   return true;
+}
+
+std::filesystem::path RendererRestartTarget() {
+#if defined(_WIN32)
+  const auto wanted = RendererState();
+  if (wanted == installer::kBuiltRenderer)
+    return {};
+  // Next to the running executable, not inside the install: a build-dir exe
+  // restarts into its own sibling rather than the installed one.
+  const auto sibling = rex::filesystem::GetExecutablePath().parent_path() /
+                       installer::RendererExecutable(wanted);
+  std::error_code ec;
+  if (!std::filesystem::exists(sibling, ec)) {
+    BD_WARN("[backend] {} is missing, restarting on this renderer",
+            sibling.filename().string());
+    return {};
+  }
+  return sibling;
+#else
+  return {};
+#endif
 }
 
 const char *SettingsPageLabel(SettingsPage page) {

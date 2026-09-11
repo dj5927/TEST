@@ -57,6 +57,11 @@ bool RelaunchSelf(bool repair);
 // the replacement never overlaps this process on the GPU, which does mean a
 // failed spawn leaves nothing to fall back to. Under Game Mode the spawn is
 // skipped and this is a settings-persisting exit.
-[[noreturn]] void PerformWarmReboot(const std::function<void()> &quiesce);
+//
+// An empty exe restarts this executable. A backend switch passes the sibling
+// built for the chosen renderer, which is what carries that choice across the
+// restart now that a plain launch runs the backend it was built for.
+[[noreturn]] void PerformWarmReboot(const std::function<void()> &quiesce,
+                                    std::filesystem::path exe = {});
 
 } // namespace bd::platform

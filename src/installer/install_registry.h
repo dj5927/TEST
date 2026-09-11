@@ -52,6 +52,16 @@ constexpr const char *RendererExecutable(Renderer renderer) {
 }
 #endif
 
+// The backend this executable was built for, and so the one it runs: a plain
+// launch never starts the other exe. Windows ships one per backend, every
+// other platform is Vulkan.
+constexpr Renderer kBuiltRenderer =
+#if defined(REBLUE_D3D12)
+    Renderer::D3D12;
+#else
+    Renderer::Vulkan;
+#endif
+
 struct InstallConfig {
   // Game files under {install_root}/game, user/DLC under {install_root}/user.
   std::filesystem::path install_root;
