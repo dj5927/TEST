@@ -1,6 +1,6 @@
 /**
  * @file    engine/d2anime/anime_input.h
- * @brief       Guest pad polling for host-driven d2anime menus.
+ * @brief       Pad polling for host-driven d2anime menus.
  *
  * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
  *              All rights reserved.

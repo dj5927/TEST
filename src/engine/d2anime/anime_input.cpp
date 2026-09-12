@@ -19,23 +19,23 @@ REX_IMPORT(__imp__bdInputGetAnalogValue, InputGetAnalogValue,
 
 namespace bd::engine {
 
-namespace {
-constexpr u32 kInputManagerVA = 0x82DC9844; // -> the guest input manager
-} // namespace
+namespace addr {
+inline constexpr u32 kInputManager = 0x82DC9844;
+} // namespace addr
 
-// The bdInputCheckButton hook only reaches guest callers. This one calls the
+// The bdInputCheckButton hook only reaches engine callers. This one calls the
 // original through REX_IMPORT, so without adding it here reblue's own menus
 // would never see a host-synthesized press and the arrow keys would not move a
 // cursor in them.
 bool CheckButton(Button btn) {
-  u32 inputMgr = bd::mem::load<u32>(kInputManagerVA);
+  u32 inputMgr = bd::mem::load<u32>(addr::kInputManager);
   if (inputMgr && InputCheckButton(inputMgr, 0, static_cast<u32>(btn)) != 0)
     return true;
   return SynthesizedButton(btn);
 }
 
 bool ButtonHeld(Button btn) {
-  u32 inputMgr = bd::mem::load<u32>(kInputManagerVA);
+  u32 inputMgr = bd::mem::load<u32>(addr::kInputManager);
   if (inputMgr && InputIsPressed(inputMgr, 0, static_cast<u32>(btn), 0) != 0)
     return true;
   return SynthesizedButtonHeld(btn);
@@ -55,7 +55,7 @@ bool CheckAction(GameAction action) {
 bool ActionHeld(GameAction action) { return ButtonHeld(ActionButton(action)); }
 
 float StickValue(StickAxis axis) {
-  u32 inputMgr = bd::mem::load<u32>(kInputManagerVA);
+  u32 inputMgr = bd::mem::load<u32>(addr::kInputManager);
   if (!inputMgr)
     return 0.0f;
   return static_cast<float>(
