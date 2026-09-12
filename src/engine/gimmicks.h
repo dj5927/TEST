@@ -87,7 +87,7 @@ public:
   Gimmicks(const Gimmicks &) = delete;
   Gimmicks &operator=(const Gimmicks &) = delete;
 
-  // True once the baked table parsed and the guest's flag array resolves.
+  // True once the baked table parsed and the engine's flag array resolves.
   // Every tally is zero until then.
   bool IsReady() const;
 

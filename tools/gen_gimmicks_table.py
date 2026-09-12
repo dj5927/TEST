@@ -67,7 +67,7 @@ PACKS = ["script.ipk", "!necessity.ipk"]
 
 
 def stage_name(cat, num):
-    """Mirror of bdStageNameBuild, matching engine/field.cpp."""
+    """Mirror of bdStageNameBuild, matching engine/script.cpp."""
     hi, lo = num // 100, num % 100
     if cat == 1:
         return f"bg{hi:02d}_{lo:02d}"

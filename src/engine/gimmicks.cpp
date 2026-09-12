@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "core/logging.h"
-#include "engine/field.h"
+#include "engine/game.h"
 #include "vfs/vfs.h"
 
 #include "embedded.h"
@@ -32,7 +32,7 @@ constexpr u32 kTableVersion = 2;
 // A search point with this flag carries none, and respawns every map load.
 constexpr u16 kNoFlag = 0xFFFF;
 
-// Little-endian on purpose: the generator writes host order, not guest order.
+// Little-endian on purpose: the generator writes host order, not engine order.
 struct MapRec {
   u32 nameOff;
   u32 pointFirst, pointCount;
@@ -235,7 +235,7 @@ Gimmicks &Gimmicks::Get() {
 }
 
 bool Gimmicks::IsReady() const {
-  return table_->ok && static_cast<bool>(Field().Vars());
+  return table_->ok && static_cast<bool>(Game::Get().ScriptManTask().Vars());
 }
 
 bool Gimmicks::Has(std::string_view stem) const {
@@ -245,7 +245,7 @@ bool Gimmicks::Has(std::string_view stem) const {
 Tally Gimmicks::Points(std::string_view stem,
                        std::optional<GimmickKind> kind) const {
   Tally out;
-  const ScriptVars vars = Field().Vars();
+  const ScriptVars vars = Game::Get().ScriptManTask().Vars();
   if (!table_->ok || !vars)
     return out;
 
@@ -272,7 +272,7 @@ Tally Gimmicks::Points(std::string_view stem,
 
 Tally Gimmicks::Chests(std::string_view stem) const {
   Tally out;
-  const ScriptVars vars = Field().Vars();
+  const ScriptVars vars = Game::Get().ScriptManTask().Vars();
   if (!table_->ok || !vars)
     return out;
 
@@ -296,7 +296,7 @@ Tally Gimmicks::Chests(std::string_view stem) const {
 Tally Gimmicks::Barriers(std::string_view stem,
                          std::optional<BarrierColor> color) const {
   Tally out;
-  const ScriptVars vars = Field().Vars();
+  const ScriptVars vars = Game::Get().ScriptManTask().Vars();
   if (!table_->ok || !vars)
     return out;
 
@@ -323,7 +323,7 @@ std::vector<Marker> Gimmicks::Markers(std::string_view stem) const {
   if (!m)
     return out;
 
-  const ScriptVars vars = Field().Vars();
+  const ScriptVars vars = Game::Get().ScriptManTask().Vars();
   out.reserve(m->pointCount + m->chestCount + m->barrierCount);
   for (u32 i = 0; i < m->pointCount; ++i) {
     const PointRec &p = table_->points[m->pointFirst + i];

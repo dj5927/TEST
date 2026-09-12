@@ -16,7 +16,7 @@
 #include <rex/string.h>
 
 #include "core/logging.h"
-#include "engine/field.h"
+#include "engine/game.h"
 #include "engine/gimmicks.h"
 
 namespace {
@@ -32,7 +32,7 @@ std::string Scope(std::string_view args) {
     return std::string(Gimmicks::kEverywhere);
   if (!a.empty())
     return std::string(a);
-  return bd::engine::Field().Stage().Name();
+  return bd::engine::Game::Get().ScriptManTask().Script().Name();
 }
 
 std::string ScopeName(const std::string &stem) {
