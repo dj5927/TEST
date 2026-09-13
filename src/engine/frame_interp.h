@@ -11,9 +11,9 @@
 
 namespace bd::engine {
 
-// Call once per bdMainGameStep iteration, before the guest's logic block:
+// Call once per bdMainGameStep iteration, before the engine's logic block:
 // advances the tick clock and releases anything the interpolator deferred.
-void OnGuestGameStep();
+void OnGameStep();
 
 bool SparseFrame();
 

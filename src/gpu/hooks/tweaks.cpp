@@ -30,8 +30,6 @@
 #include "gpu/settings.h"
 
 namespace {
-constexpr u32 kVisualRenderEA = 0x82DC9848;
-constexpr u32 kVisualRenderRateOff = 0x1BC4;
 constexpr u32 kScreenUVScaleReg = 50;
 constexpr u32 kSsScatterBlurEA = 0x82DF4344;
 constexpr u32 kOpaqueBlackArgb = 0xFF000000u;
@@ -75,13 +73,13 @@ namespace bd::gpu {
 // Event scenes hold BD's authored coverage, so pin it to original for the
 // duration of an .evt scene.
 f64 ShadowCoverageScale() {
-  return bd::engine::EventScenePlaying() ? 1.0
-                                         : Settings::Get().ShadowDistance();
+  return bd::engine::IssEvent::LiveCount() > 0
+             ? 1.0
+             : Settings::Get().ShadowDistance();
 }
 
 f32 SceneRenderScale() {
-  const u32 render = bd::mem::try_load<u32>(kVisualRenderEA);
-  const f32 rate = bd::mem::try_field<f32>(render, kVisualRenderRateOff, 1.0f);
+  const f32 rate = bd::engine::VisualRender::Get().RenderRate();
   return rate > 0.0f ? rate : 1.0f;
 }
 
@@ -94,8 +92,7 @@ void bdSceneFSAASeedHook(PPCRegister &r11) {
 bool bdSceneTilingSuppressHook() { return true; }
 
 void bdSceneRenderScaleHook(PPCRegister &r31) {
-  bd::mem::try_store<f32>(
-      r31.u32 + kVisualRenderRateOff,
+  bd::engine::VisualRender(r31.u32).SetRenderRate(
       static_cast<f32>(bd::gpu::Settings::Get().SuperSampling()));
 }
 

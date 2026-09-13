@@ -10,8 +10,8 @@
 #include <algorithm>
 #include <chrono>
 
-#include "engine/cutscene.h"
 #include "engine/settings.h"
+#include "engine/sofdec_player.h"
 
 namespace bd::engine {
 namespace {
@@ -68,7 +68,7 @@ double NowSeconds() {
 
 bool InterpolationActive() {
   const i32 fps = Settings::Get().FPSLimit();
-  return (fps == 0 || fps > 30) && !SofdecMoviePlaying();
+  return (fps == 0 || fps > 30) && !SofdecPlayer::Playing();
 }
 
 void Advance() {

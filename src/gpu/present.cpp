@@ -54,7 +54,7 @@ void PaceFrame(bool idle = false) {
   i32 fps = bd::engine::Settings::Get().FPSLimit();
   // The Sofdec movie clock advances from the per-frame delta inside BD's
   // 30Hz-gated logic, so it only runs at 1.0x when the engine ticks at 30Hz.
-  if (bd::engine::SofdecMoviePlaying())
+  if (bd::engine::SofdecPlayer::Playing())
     fps = 30;
   if (idle && (fps <= 0 || fps > kIdleFPS))
     fps = kIdleFPS;
@@ -196,7 +196,7 @@ void RecordPresentPass(VideoState &s, GuestTexture *rt, GuestTexture *chosen,
   // across that rect, so fitting the present to the design ratio squeezes it
   // back out. Stretch mode asked for the distortion and keeps it.
   const double present_aspect =
-      (bd::engine::SofdecMoviePlaying() && !Output::StretchToFill())
+      (bd::engine::SofdecPlayer::Playing() && !Output::StretchToFill())
           ? kDesignCanvasAspect
           : Output::RenderAspect();
   u32 fit_w = swap_w, fit_h = swap_h;

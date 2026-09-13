@@ -30,17 +30,18 @@
 
 #include "core/memory_helpers.h"
 #include "core/profiling.h"
-#include "engine/battle.h"
-#include "engine/cutscene.h"
+#include "engine/d2anime/anime_data.h"
 #include "engine/d2anime/anime_mouse.h"
 #include "engine/d2anime/d2anime_task.h"
-#include "engine/d2anime/d2anime_types.h"
 #include "engine/frame_clock.h"
+#include "engine/game.h"
 #include "engine/guest_prim.h"
 #include "engine/glyph_set.h"
+#include "engine/iss_event.h"
 #include "engine/menus/camp_settings.h"
 #include "engine/menus/local_map.h"
 #include "engine/mouse_cursor.h"
+#include "engine/ply_task.h"
 #include "engine/settings.h"
 #include "engine/state_layout.h"
 #include "engine/virtual_buttons.h"
@@ -98,14 +99,14 @@ float DistSq(const float a[3], const float b[3]) {
   return dx * dx + dy * dy + dz * dz;
 }
 
-u32 GuestScratch(u32 &slot, u32 bytes) {
+u32 EngineScratch(u32 &slot, u32 bytes) {
   if (slot == 0)
     slot = bd::gpu::HostHeap::Get().AllocGuest((bytes + 15u) & ~15u, 16);
   return slot;
 }
 
 u32 WriteScratch(u32 &slot, const float *v, int n) {
-  if (!GuestScratch(slot, u32(n) * 4))
+  if (!EngineScratch(slot, u32(n) * 4))
     return 0;
   WriteFloats(bd::mem::at<be_f32>(slot), v, n);
   return slot;
@@ -708,7 +709,7 @@ Snapshot AdvanceSnapshot(u64 key, u32 srcVa, int floats, FloatSnapshot *&out) {
 
 u32 LerpToScratch(const FloatSnapshot &e, float a, u32 &scratch,
                   int scratchFloats) {
-  if (!GuestScratch(scratch, u32(scratchFloats) * 4))
+  if (!EngineScratch(scratch, u32(scratchFloats) * 4))
     return 0;
   auto *dst = bd::mem::at<be_f32>(scratch);
   const size_t floats = e.curr.size();
@@ -772,70 +773,27 @@ void bdPopUpAgeLerpHook(PPCRegister &age) {
     age.f64 += bd::engine::Alpha();
 }
 
-namespace {
-
-constexpr u32 kMaxChainEntries = 4096;
-
-} // namespace
-
 void bdAnimeChainEnableActiveHook(PPCRegister &r28) {
-  using namespace bd::engine;
-  auto *anime = bd::mem::try_at<AnimeData_t>(r28.u32);
-  if (!anime || anime->activeChain.size() > kMaxChainEntries)
-    return;
-  const f32 clock = anime->frame;
-  for (u32 i = 0; i < anime->activeChain.size(); ++i) {
-    auto *node = anime->activeChain[i].get();
-    if (!node || node->elements.size() > kMaxChainEntries)
-      continue;
-    for (u32 j = 0; j < node->elements.size(); ++j) {
-      auto *element = node->elements[j].get();
-      if (!element)
-        continue;
-      element->timer = clock;
-      if (auto *child = element->childAnime.get())
-        child->childEnabled = 1;
-    }
-  }
+  bd::engine::AnimeData(r28.u32).SyncActiveChain();
 }
-
-namespace {
-
-struct PlyTask_t {
-  /* 0x0000 */ u8 _pad0000[0xBC4];
-  /* 0x0BC4 */ be_f32 ambient[3];
-  /* 0x0BD0 */ u8 _pad0BD0[0xC40 - 0xBD0];
-  /* 0x0C40 */ be_f32 alpha;
-  /* 0x0C44 */ u8 _pad0C44[0xC54 - 0xC44];
-  /* 0x0C54 */ be_u32 alphaDirty;
-  /* 0x0C58 */ u8 _pad0C58[0x28C0 - 0xC58];
-  /* 0x28C0 */ be_u32 blinkArm;
-};
-static_assert(offsetof(PlyTask_t, ambient) == 0xBC4);
-static_assert(offsetof(PlyTask_t, alpha) == 0xC40);
-static_assert(offsetof(PlyTask_t, alphaDirty) == 0xC54);
-static_assert(offsetof(PlyTask_t, blinkArm) == 0x28C0);
-
-} // namespace
 
 bool bdPlayerAmbientRampGateHook(PPCRegister &r31) {
   if (!bd::engine::InterpolationActive())
     return false;
-  auto *task = TryStruct<PlyTask_t>(r31.u32);
-  if (!task)
+  bd::engine::Player chara = bd::engine::PlyTask(r31.u32).Chara();
+  if (!chara)
     return true;
-  const float green = task->ambient[1];
+  const f32 green = chara.Ambient(1);
   if (green >= 1.0f)
     return true;
-  const float next =
-      green + 0.1f * float(bd::engine::FrameDelta() / kTickSeconds);
+  const f32 next = green + 0.1f * f32(bd::engine::FrameDelta() / kTickSeconds);
   if (next >= 1.0f) {
-    task->ambient[0] = 1.0f;
-    task->ambient[1] = 1.0f;
-    task->ambient[2] = 1.0f;
+    chara.SetAmbient(0, 1.0f);
+    chara.SetAmbient(1, 1.0f);
+    chara.SetAmbient(2, 1.0f);
   } else {
-    task->ambient[1] = next;
-    task->ambient[2] = next;
+    chara.SetAmbient(1, next);
+    chara.SetAmbient(2, next);
   }
   return true;
 }
@@ -1079,10 +1037,10 @@ std::atomic<bool> g_evtEngaged{false};
 
 void UpdateEventEngagement() {
   g_evtEngaged.store(
-      bd::engine::EventScenePlaying() &&
+      bd::engine::IssEvent::LiveCount() > 0 &&
           bd::engine::FrameTime() <
               g_evtEngagedUntil.load(std::memory_order_relaxed) &&
-          !bd::engine::Battle{}.IsActive(),
+          !bd::engine::Game::Get().BattleCameraTask(),
       std::memory_order_relaxed);
 }
 
@@ -1224,20 +1182,32 @@ bool EvtClipRestarted(u32 childEA) {
   return object && g_evtRestartedVO.count(u32(object->visualObject)) != 0;
 }
 
+int LiveEventAddresses(u32 *out) {
+  int n = 0;
+  const size_t count = bd::engine::IssEvent::LiveCount();
+  for (size_t i = 0; i < count; ++i) {
+    const u32 ea = bd::engine::IssEvent::LiveAt(i).Address();
+    if (ea)
+      out[n++] = ea;
+  }
+  return n;
+}
+
 void StepEventScenes() {
   g_evtTickAdvanced.clear();
   g_evtRestartedVO.clear();
   const bool tick = bd::engine::TickDue();
   if (tick)
     g_evtTickScaled.clear();
-  if (!bd::engine::InterpolationActive() || !bd::engine::EventScenePlaying()) {
+  if (!bd::engine::InterpolationActive() ||
+      bd::engine::IssEvent::LiveCount() == 0) {
     g_evtDrive.clear();
     g_camSaves.clear();
     g_evtCameras.clear();
     return;
   }
   u32 live[kMaxEventTasks];
-  const int n = bd::engine::Cutscene().Tasks(live, kMaxEventTasks);
+  const int n = LiveEventAddresses(live);
   std::erase_if(g_evtDrive, [&](const auto &kv) {
     return std::find(live, live + n, kv.first) == live + n;
   });
@@ -1308,7 +1278,7 @@ void FlushEvtHidePending() {
     return;
   std::unordered_set<u32> live;
   u32 evts[kMaxEventTasks];
-  const int n = bd::engine::Cutscene().Tasks(evts, kMaxEventTasks);
+  const int n = LiveEventAddresses(evts);
   for (int i = 0; i < n; ++i)
     if (auto *evt = TryStruct<IssEvent_t>(evts[i]))
       ForEachEventChild(*evt, [&](u32 childEA, const IssChild_t &) {
@@ -1436,7 +1406,7 @@ REX_HOOK_RAW(LipPlayerSample) {
   auto *player = TryStruct<LipPlayer_t>(ctx.r3.u32);
   __imp__LipPlayerSample(ctx, base);
   if (!player || !bd::engine::InterpolationActive() ||
-      !bd::engine::EventScenePlaying())
+      bd::engine::IssEvent::LiveCount() == 0)
     return;
   if (u32(player->state) != kLipPlaying)
     return;
@@ -1673,9 +1643,9 @@ void FlushPlyBlinkWindow() {
   const u64 tick = bd::engine::TickCount();
   for (auto it = g_plyBlinkWindow.begin(); it != g_plyBlinkWindow.end();) {
     if (it->second.held) {
-      if (auto *task = TryStruct<PlyTask_t>(it->first)) {
-        task->alpha = it->second.alpha;
-        task->alphaDirty = it->second.dirty;
+      if (auto chara = bd::engine::PlyTask(it->first).Chara()) {
+        chara.SetAlpha(it->second.alpha);
+        chara.SetAlphaDirty(it->second.dirty);
       }
       it->second.held = false;
     }
@@ -2146,7 +2116,7 @@ struct ItemDropTextCapture {
 
 ItemDropTextCapture g_itemDropText;
 
-bool CopyGuestWideString(u32 srcVa, u32 dstVa) {
+bool CopyWideString(u32 srcVa, u32 dstVa) {
   auto *src = bd::mem::try_at<const be_u16>(srcVa);
   auto *dst = bd::mem::at<be_u16>(dstVa);
   if (!src || !dst)
@@ -2181,9 +2151,9 @@ bool bdItemDropTextCaptureHook(PPCRegister &f1, PPCRegister &f2,
   }
   if (cap.count >= kItemDropTextPrims)
     return false;
-  if (!GuestScratch(cap.textEA, kItemDropTextChars * sizeof(be_u16)))
+  if (!EngineScratch(cap.textEA, kItemDropTextChars * sizeof(be_u16)))
     return false;
-  if (cap.count == 0 && !CopyGuestWideString(r8.u32, cap.textEA)) {
+  if (cap.count == 0 && !CopyWideString(r8.u32, cap.textEA)) {
     cap.tick = ~0ull;
     return false;
   }
@@ -2541,7 +2511,7 @@ REX_HOOK_RAW(bdLightListUpdateSnapshot) {
 
 namespace bd::engine {
 
-void OnGuestGameStep() {
+void OnGameStep() {
   UpdateEventEngagement();
   Advance();
   {
@@ -2808,25 +2778,23 @@ REX_HOOK_RAW(bdWorldToScreenPos4) {
 
 REX_EXTERN(__imp__PlyTask__Draw);
 REX_HOOK_RAW(PlyTask__Draw) {
-  auto *task = bd::engine::InterpolationActive()
-                   ? TryStruct<PlyTask_t>(ctx.r3.u32)
-                   : nullptr;
-  if (task) {
-    const u32 arm = task->blinkArm;
+  bd::engine::PlyTask task(bd::engine::InterpolationActive() ? ctx.r3.u32 : 0);
+  if (auto chara = task.Chara()) {
+    const u32 arm = task.BlinkArm();
     if (arm == 1) {
-      task->blinkArm = 0u;
+      task.SetBlinkArm(0u);
       g_plyBlinkWindow[ctx.r3.u32].tick = bd::engine::TickCount();
     }
     if (arm <= 1) {
       auto it = g_plyBlinkWindow.find(ctx.r3.u32);
       if (it != g_plyBlinkWindow.end() && !it->second.held) {
-        const f32 cur = task->alpha;
+        const f32 cur = chara.Alpha();
         if (cur > kPlyBlinkAlpha) {
           it->second.alpha = cur;
-          it->second.dirty = task->alphaDirty;
+          it->second.dirty = chara.AlphaDirty();
           it->second.held = true;
-          task->alpha = kPlyBlinkAlpha;
-          task->alphaDirty = 1u;
+          chara.SetAlpha(kPlyBlinkAlpha);
+          chara.SetAlphaDirty(1u);
         }
       }
     }
@@ -2834,17 +2802,12 @@ REX_HOOK_RAW(PlyTask__Draw) {
   __imp__PlyTask__Draw(ctx, base);
 }
 
-REX_IMPORT(__imp__AnimeVarTrack_Apply, AnimeVarTrack_Apply, void(u32, f64));
-REX_IMPORT(__imp__AnimeData_SyncDerivedVars, AnimeData_SyncDerivedVars,
-           void(u32));
-
 namespace {
 
-constexpr u32 kAnimeVarTrackCap = 512;
-constexpr float kAnimeFirstFrame = 1.0f;
+constexpr f32 kAnimeFirstFrame = 1.0f;
 
-float LerpedAnimeFrame(u32 taskEA, const bd::engine::D2AnimeTask_t &task) {
-  const float live = static_cast<float>(task.animeData.frame);
+f32 LerpedAnimeFrame(u32 taskEA, const bd::engine::AnimeData &data) {
+  const f32 live = data.Frame();
   std::lock_guard<std::mutex> lock(g_interpMutex);
   AnimeClock &c = g_animeClocks[taskEA];
   c.lastSeen = g_frame;
@@ -2856,8 +2819,7 @@ float LerpedAnimeFrame(u32 taskEA, const bd::engine::D2AnimeTask_t &task) {
     c.rewriteTick = bd::engine::TickCount();
   } else if (c.curr != live) {
     const bool cut = RewrittenThisTick(c.rewriteTick) ||
-                     AnimeClockDiscontinuous(
-                         live - c.curr, static_cast<float>(task.animeData.speed));
+                     AnimeClockDiscontinuous(live - c.curr, data.Speed());
     c.prev = cut ? live : c.curr;
     c.curr = live;
     c.lastChange = now;
@@ -2874,28 +2836,20 @@ float LerpedAnimeFrame(u32 taskEA, const bd::engine::D2AnimeTask_t &task) {
 
 REX_EXTERN(__imp__D2AnimeTask_Draw);
 REX_HOOK_RAW(D2AnimeTask_Draw) {
-  auto *task = bd::engine::InterpolationActive()
-                   ? bd::mem::try_at<bd::engine::D2AnimeTask_t>(ctx.r3.u32)
-                   : nullptr;
-  const float live = task ? static_cast<float>(task->animeData.frame) : 0.0f;
-  const float lerped = task ? LerpedAnimeFrame(ctx.r3.u32, *task) : 0.0f;
-  if (!task || lerped == live) {
+  bd::engine::AnimeData data =
+      bd::engine::InterpolationActive()
+          ? bd::engine::D2AnimeTask(ctx.r3.u32).AnimeData()
+          : bd::engine::AnimeData();
+  const f32 live = data ? data.Frame() : 0.0f;
+  const f32 lerped = data ? LerpedAnimeFrame(ctx.r3.u32, data) : 0.0f;
+  if (!data || lerped == live) {
     __imp__D2AnimeTask_Draw(ctx, base);
     return;
   }
-  task->animeData.frame = lerped;
-  const auto &tracks = task->animeData.varTracks;
-  const u32 count = std::min<u32>(tracks.size(), kAnimeVarTrackCap);
-  for (u32 i = 0; i < count; ++i) {
-    if (const u32 track = bd::mem::try_load<u32>(tracks.address(i)))
-      AnimeVarTrack_Apply(track, f64(lerped));
-  }
-  if (count) {
-    AnimeData_SyncDerivedVars(ctx.r3.u32 +
-                              offsetof(bd::engine::D2AnimeTask_t, animeData));
-  }
+  data.SetFrame(lerped);
+  data.ApplyVarTracks(lerped);
   __imp__D2AnimeTask_Draw(ctx, base);
-  task->animeData.frame = live;
+  data.SetFrame(live);
 }
 
 void bdAnimeChildClockFloorHook(PPCRegister &time) {

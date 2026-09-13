@@ -42,10 +42,6 @@ using bd::gpu::Output;
 
 namespace {
 
-// BD's master W/H, both f32 on the VisualRender 'this'.
-constexpr u32 kVisualRenderScreenWOff = 0x1A38;
-constexpr u32 kVisualRenderScreenHOff = 0x1A3C;
-
 // The close-up view's own W/H, both f32 on its 'this'.
 constexpr u32 kCloseUpViewWidthOff = 0x1D0;
 constexpr u32 kViewTextureWOff = 0x38;
@@ -57,8 +53,7 @@ constexpr f32 kViewFitSlack = 8.0f;
 // SAFE/RATE under the Mindows RENDER>DEBUG tree, the f32 scale of the guide box
 // the renderer draws when SAFE/DISP is on. Stock 0.9 is the CRT overscan margin,
 // which hides nothing on a display that shows the whole frame.
-constexpr u32 kVisualRenderSafeRateOff = 0x1B58;
-constexpr float kSafeAreaRate = 0.99f;
+constexpr f32 kSafeAreaRate = 0.99f;
 
 // Guest globals the output res hooks rewrite.
 constexpr u32 kDeviceBackBufferWEA = 0x82DDA670;
@@ -72,7 +67,8 @@ constexpr u32 kViewportHeightEA = 0x82DE891C;
 // edges. Battle carries the summon and corporeal sequences, which run off the
 // battle action steps rather than an .evt scene.
 bool AuthoredFraming() {
-  return bd::engine::EventScenePlaying() || bd::engine::Battle().IsActive();
+  return bd::engine::IssEvent::LiveCount() > 0 ||
+         static_cast<bool>(bd::engine::Game::Get().BattleCameraTask());
 }
 
 bool ScaleDesignDims(f64 &w, f64 &h) {
@@ -94,10 +90,9 @@ void bdOutputResScreenDimsHook(PPCRegister &r31) {
   u32 w, h;
   if (!Output::RenderSize(w, h))
     return;
-  bd::mem::store<float>(r31.u32 + kVisualRenderScreenWOff,
-                        static_cast<float>(w));
-  bd::mem::store<float>(r31.u32 + kVisualRenderScreenHOff,
-                        static_cast<float>(h));
+  bd::engine::VisualRender render(r31.u32);
+  render.SetScreenW(static_cast<f32>(w));
+  render.SetScreenH(static_cast<f32>(h));
 }
 
 // The bdInitGpuMemory tail, after the device dims and the float pair are
@@ -221,12 +216,13 @@ REX_HOOK_RAW(VisualRender__ctor) {
   __imp__VisualRender__ctor(ctx, base);
   if (!self)
     return;
-  bd::mem::store<float>(self + kVisualRenderSafeRateOff, kSafeAreaRate);
+  bd::engine::VisualRender render(self);
+  render.SetSafeRate(kSafeAreaRate);
   u32 w, h;
   if (!Output::RenderSize(w, h))
     return;
-  bd::mem::store<float>(self + kVisualRenderScreenWOff, kDesignCanvasWidth);
-  bd::mem::store<float>(self + kVisualRenderScreenHOff, kDesignCanvasHeight);
+  render.SetScreenW(kDesignCanvasWidth);
+  render.SetScreenH(kDesignCanvasHeight);
 }
 
 // The patch sites cover every read that wants the output dims, so the struct

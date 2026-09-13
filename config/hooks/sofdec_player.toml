@@ -1,0 +1,8 @@
+# Movie playback tracking (bodies in src/engine/sofdec_player.cpp).
+
+# SFD movie playback, which suspends the FPS unlock while a movie plays.
+[[midasm_hook]]
+address = 0x8212FB6C
+name = "bdMoviePlaybackHook"
+registers = ["r31"]
+after_instruction = false
