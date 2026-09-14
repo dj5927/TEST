@@ -36,9 +36,8 @@ inline constexpr const char *kBindableKeys[] = {
 };
 
 // Declaration order is also the key atlas's cell order, which
-// tools/build_glyph_sheet.py reads out of this header and
 // engine/glyph_set.cpp indexes into. Inserting a name shifts every cell after
-// it, so the sheet has to be rebuilt whenever this list changes.
+// it, so res/embed/glyphs has to be redrawn whenever this list changes.
 inline constexpr size_t kBindableKeyCount =
     sizeof(kBindableKeys) / sizeof(kBindableKeys[0]);
 

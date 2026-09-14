@@ -27,10 +27,9 @@ namespace bd::engine {
 
 namespace {
 
-// The cap library tools/build_glyph_sheet.py emits beside the footer sheet: one
-// 128px cell per bindable key in kBindableKeys order, then the arrow cluster,
-// then four face buttons per pad in PadSet order for the pad side of these
-// prompts.
+// The cap library beside the footer sheet: one 128px cell per bindable key in
+// kBindableKeys order, then the arrow cluster, then four face buttons per pad
+// in PadSet order for the pad side of these prompts.
 constexpr u32 kLibCell = 128;
 constexpr u32 kLibCols = 8;
 constexpr u32 kPadCellBase = u32(bd::platform::kBindableKeyCount) + 1;
