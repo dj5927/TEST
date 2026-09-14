@@ -6,8 +6,8 @@
 
 #include <rex/ui/window.h>
 
-#include "core/global_config.h"
 #include "core/settings.h"
+#include "engine/engine.h"
 
 namespace bd::platform {
 namespace {
@@ -88,8 +88,8 @@ u8 KeyboardInput::Modifiers() const {
 bool KeyboardInput::ShouldSwallow() const {
   if (!bd::Settings::Get().Devmode())
     return false;
-  const auto *hidden = GetMindowsHiddenFlag();
-  return hidden && *hidden == 0u;
+  const auto &game = bd::engine::Game::Get();
+  return game.IsReady() && !game.MindowsHidden();
 }
 
 void KeyboardInput::OnKeyDown(rex::ui::KeyEvent &e) {

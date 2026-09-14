@@ -6,21 +6,23 @@
  */
 #include "engine/action_map.h"
 
-#include "core/global_config.h"
 #include "core/memory_helpers.h"
+#include "engine/config.h"
+#include "engine/game_options.h"
 
 namespace bd::engine {
 
+namespace addr {
+// bdGetCurrentMapPath's own arithmetic: the per-type rows, sixty bytes apart,
+// and the row it substitutes when the player is on type A and the alternate
+// map flag is set.
+inline constexpr u32 kTypeRows = 0x8205D798;
+inline constexpr u32 kDefaultRow = 0x8205D75C;
+} // namespace addr
+
 namespace {
 
-// bdGetCurrentMapPath's own arithmetic: the per-type rows, sixty bytes apart,
-// and the row it substitutes when the player is on type A and the config flag
-// at globalConfig+0x178 is set.
-constexpr u32 kTypeRows = 0x8205D798;
-constexpr u32 kDefaultRow = 0x8205D75C;
 constexpr u32 kRowStride = 60;
-constexpr u32 kCfgCtlNormalType = 0x82DC40E0;
-constexpr u32 kGlobalConfigAltMap = 0x178;
 
 // Beyond the last row the disc ships. A value outside this would index past the
 // table into whatever follows it.
@@ -70,13 +72,12 @@ ActionMap &ActionMap::Get() {
 }
 
 u32 ActionMap::Row() const {
-  const u32 type = mem::try_load<u32>(kCfgCtlNormalType);
+  const auto type = static_cast<u32>(GameOptions::Get().CtlNormalType());
   if (type >= kControlTypeCount)
     return 0;
-  if (type == 0 &&
-      mem::try_load<u32>(kGlobalConfigAddr + kGlobalConfigAltMap) != 0)
-    return kDefaultRow;
-  return kTypeRows + type * kRowStride;
+  if (type == 0 && Config::Get().AltMap() != 0)
+    return addr::kDefaultRow;
+  return addr::kTypeRows + type * kRowStride;
 }
 
 int ActionMap::Button(GameAction action) const {
