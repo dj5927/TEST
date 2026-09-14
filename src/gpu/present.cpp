@@ -42,11 +42,13 @@ void ApplyVsync(VideoState &s) {
   }
 }
 
+constexpr i32 kIdleFPS = 30;
+
 // Sleeps (no busy-wait) so consecutive presents sit at least 1000/bd_fps_limit
 // ms apart, and 0 disables. Pacing the render thread back-pressures the guest
 // main thread through the DrawEnd event. Runs even under vsync, which paces to
 // the monitor instead, and a 120Hz panel ran the loop at 120 under a 60 cap.
-void PaceFrame() {
+void PaceFrame(bool idle = false) {
   using Clock = std::chrono::steady_clock;
   static Clock::time_point next{};
   i32 fps = bd::engine::Settings::Get().FPSLimit();
@@ -54,6 +56,8 @@ void PaceFrame() {
   // 30Hz-gated logic, so it only runs at 1.0x when the engine ticks at 30Hz.
   if (bd::engine::SofdecMoviePlaying())
     fps = 30;
+  if (idle && (fps <= 0 || fps > kIdleFPS))
+    fps = kIdleFPS;
   if (fps <= 0) {
     next = {};
     return;
@@ -325,6 +329,9 @@ void Video::Present(GuestTexture *frontBuffer) {
   // UAF.
   if (s.framebuffers.empty()) {
     AbandonFrame(s, lock);
+    if (lock.owns_lock())
+      lock.unlock();
+    PaceFrame(true);
     return;
   }
 

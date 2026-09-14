@@ -6,6 +6,7 @@
 
 #include <rex/ui/window.h>
 
+#include "core/settings.h"
 #include "engine/engine.h"
 
 namespace bd::platform {
@@ -41,6 +42,8 @@ void MouseInput::Detach() {
 }
 
 bool MouseInput::Position(f32 &x, f32 &y) const {
+  if (!bd::Settings::Get().Mnk())
+    return false;
   if (!hasPosition_.load(std::memory_order_relaxed))
     return false;
   x = x_.load(std::memory_order_relaxed);
@@ -49,11 +52,13 @@ bool MouseInput::Position(f32 &x, f32 &y) const {
 }
 
 bool MouseInput::MovedSince() {
-  return moved_.exchange(false, std::memory_order_relaxed);
+  const bool moved = moved_.exchange(false, std::memory_order_relaxed);
+  return moved && bd::Settings::Get().Mnk();
 }
 
 int MouseInput::TakeWheelDetents() {
-  return wheelAccum_.exchange(0, std::memory_order_relaxed);
+  const int detents = wheelAccum_.exchange(0, std::memory_order_relaxed);
+  return bd::Settings::Get().Mnk() ? detents : 0;
 }
 
 bool MouseInput::WindowSize(f32 &w, f32 &h) const {
@@ -128,11 +133,13 @@ void MouseInput::OnMouseUp(rex::ui::MouseEvent &e) {
 }
 
 bool MouseInput::IsButtonDown(rex::ui::MouseEvent::Button button) const {
-  return (buttons_.load(std::memory_order_relaxed) & (1u << u32(button))) != 0;
+  return bd::Settings::Get().Mnk() &&
+         (buttons_.load(std::memory_order_relaxed) & (1u << u32(button))) != 0;
 }
 
 bool MouseInput::AnyButtonDown() const {
-  return buttons_.load(std::memory_order_relaxed) != 0;
+  return bd::Settings::Get().Mnk() &&
+         buttons_.load(std::memory_order_relaxed) != 0;
 }
 
 void MouseInput::OnLostFocus(rex::ui::UISetupEvent &) {

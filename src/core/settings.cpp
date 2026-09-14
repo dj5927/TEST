@@ -158,6 +158,11 @@ void Settings::ComposeUpdateUrl() {
                          ".toml";
 }
 
+void Settings::AdoptMnk() {
+  mnk_ = rex::cvar::GetFlagByName("mnk_mode") == "true";
+}
+
+
 void Settings::AdoptSavesPath() { savesPath_ = REXCVAR_GET(bd_saves_path); }
 void Settings::AdoptCachePath() { cachePath_ = REXCVAR_GET(bd_cache_path); }
 
@@ -211,6 +216,7 @@ bool Settings::SetUpdateChannel(bd::UpdateChannel v) {
 void Settings::AdoptCvars() {
   AdoptDevmode();
   AdoptDbgPrint();
+  AdoptMnk();
   AdoptLanguage();
   AdoptI18nKeys();
   AdoptLanguagePath();
@@ -236,6 +242,7 @@ void Settings::Init() {
   };
   reg("bd_devmode", &Settings::AdoptDevmode);
   reg("bd_dbgprint", &Settings::AdoptDbgPrint);
+  reg("mnk_mode", &Settings::AdoptMnk);
   reg("bd_language", &Settings::AdoptLanguage);
   reg("bd_i18n_keys", &Settings::AdoptI18nKeys);
   reg("bd_lang_path", &Settings::AdoptLanguagePath);

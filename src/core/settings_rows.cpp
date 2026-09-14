@@ -44,6 +44,12 @@ bool RubyHidden() { return i18n::CurrentLocale() != engine::kLocaleJP; }
 // bd_boot.ini's [Voice] list gives it something to choose between.
 bool VoiceLanguageHidden() { return engine::Language().VoiceCount() < 2; }
 
+double DisplayModeNum() {
+  if (rex::cvar::GetFlagByName("fullscreen") != "true")
+    return 0.0;
+  return rex::cvar::GetFlagByName("fullscreen_exclusive") == "true" ? 2.0 : 1.0;
+}
+
 double RenderResolutionNum() {
   i32 w = 0, h = 0;
   return rex::graphics::video_mode_util::TryGetResolutionPresetFromCVar(w, h)
@@ -64,8 +70,21 @@ bool SetRenderResolution(const char *preset) {
 }
 
 constexpr SettingOption kDisplayMode[] = {
-    {.text = "Windowed", .num = 0, .value = "false", .key = "opt.windowed"},
-    {.text = "Fullscreen", .num = 1, .value = "true", .key = "opt.fullscreen"}};
+    {.text = "Windowed",
+     .num = 0,
+     .value = "false",
+     .value2 = "false",
+     .key = "opt.windowed"},
+    {.text = "Borderless",
+     .num = 1,
+     .value = "true",
+     .value2 = "false",
+     .key = "opt.borderless"},
+    {.text = "Fullscreen",
+     .num = 2,
+     .value = "true",
+     .value2 = "true",
+     .key = "opt.fullscreen"}};
 constexpr SettingOption kResolution[] = {
     {.text = "Auto", .num = 0, .value = "", .key = "opt.auto"},
     {.text = "1280x720", .num = 1280, .value = "1280x720"},
@@ -484,7 +503,9 @@ constexpr SettingRow kGameplaySettings[] = {
 constexpr SettingRow kDisplaySettings[] = {
     {.label = "settings.display.display_mode.label",
      .group = "menu.header.window",
-     .binding = {.cvar = "fullscreen"},
+     .binding = {.get = DisplayModeNum,
+                 .cvar = "fullscreen",
+                 .cvar2 = "fullscreen_exclusive"},
      .options = kDisplayMode,
      .count = OptCount(kDisplayMode),
      .restart = true},
@@ -890,7 +911,8 @@ constexpr SettingRow kControlsSettings[] = {
      .smin = static_cast<double>(engine::Settings::kMouseCursorOpacityMin),
      .smax = static_cast<double>(engine::Settings::kMouseCursorOpacityMax),
      .sstep = 5.0,
-     .sfmt = "%.0f"},
+     .sfmt = "%.0f",
+     .kbGated = true},
     {.label = "settings.controls.keyboard_binds.label",
      .group = "menu.header.keyboard_mouse",
      .kind = SettingKind::Action,

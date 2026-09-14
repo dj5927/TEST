@@ -6,6 +6,8 @@
  */
 #include "audio/settings.h"
 #include "core/memory_helpers.h"
+#include "core/settings.h"
+#include "platform/platform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +32,7 @@ constexpr u32 kBadFramesBeforeMute = 2;
 constexpr f32 kUnreadableFrame = -1.0f;
 
 f32 g_gain = 1.0f;
+f32 g_limitGain = 1.0f;
 u32 g_badFrames = 0;
 
 void ClearUnmanagedReverbSend(u32 x3dVol) {
@@ -73,9 +76,14 @@ void ApplyGainRamp(u32 samplesVA, u32 channels, f32 from, f32 to) {
   }
 }
 
+bool MuteWanted() { return !bd::platform::Keyboard().WindowFocused(); }
+
 void GuardOutputFrame(u32 frameVA) {
+  if (!frameVA)
+    return;
   const f64 limit = Settings::Get().OutputLimit();
-  if (limit <= 0.0 || !frameVA)
+  const bool muted = MuteWanted();
+  if (limit <= 0.0 && !muted && g_gain == 1.0f)
     return;
   u32 channels = mem::try_load<u32>(frameVA + kFrameFormat) >> 16;
   if (channels == 0 || channels > kFrameMaxChannels)
@@ -84,21 +92,27 @@ void GuardOutputFrame(u32 frameVA) {
   if (!samples)
     return;
 
-  const f32 peak = FramePeak(samples, channels);
-  if (peak == kUnreadableFrame)
-    return;
+  if (limit <= 0.0) {
+    g_limitGain = 1.0f;
+    g_badFrames = 0;
+  } else {
+    const f32 peak = FramePeak(samples, channels);
+    if (peak == kUnreadableFrame)
+      return;
+    if (!std::isfinite(peak)) {
+      g_badFrames = kBadFramesBeforeMute;
+      g_limitGain = 0.0f;
+    } else if (peak > static_cast<f32>(limit)) {
+      if (++g_badFrames >= kBadFramesBeforeMute)
+        g_limitGain = 0.0f;
+    } else {
+      g_badFrames = 0;
+      g_limitGain = 1.0f;
+    }
+  }
 
   const f32 was = g_gain;
-  if (!std::isfinite(peak)) {
-    g_badFrames = kBadFramesBeforeMute;
-    g_gain = 0.0f;
-  } else if (peak > static_cast<f32>(limit)) {
-    if (++g_badFrames >= kBadFramesBeforeMute)
-      g_gain = 0.0f;
-  } else {
-    g_badFrames = 0;
-    g_gain = 1.0f;
-  }
+  g_gain = muted ? 0.0f : g_limitGain;
   ApplyGainRamp(samples, channels, was, g_gain);
 }
 
