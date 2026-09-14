@@ -50,7 +50,7 @@ public:
   // 'parentUpdate' is the host hook's original, which Update runs at the point
   // the engine drives its AnimeMenu updates. It differs per surface, so the
   // menu takes it rather than naming one host's symbol.
-  void Create(u32 parentTask, Surface surface, PPCFunc *parentUpdate);
+  void Create(Task parent, Surface surface, PPCFunc *parentUpdate);
   void Destroy();
   // Close for a host that keeps the task between opens: persists what Destroy
   // persists and rewinds the state machine, while the task and its discovered
@@ -68,7 +68,7 @@ public:
   bool IsOnScreen() const { return active_ && task_ && task_.IsVisible(); }
   bool WantsRestart() const { return wants_restart_; }
 
-  u32 TaskAddr() const { return task_.guest_address(); }
+  u32 TaskAddr() const { return task_.Address(); }
 
 private:
   // Footer prompts for a state, as i18n catalog keys. A null key hides its
@@ -84,9 +84,9 @@ private:
 
   void Transition(State next);
   void EnforceActiveFlags();
-  void ActivateOnly(D2AnimeMenu *target);
+  void ActivateOnly(AnimeMenu *target);
   // Shows exactly the named lists and hides every other one.
-  void ShowOnly(std::initializer_list<D2AnimeMenu *> visible);
+  void ShowOnly(std::initializer_list<AnimeMenu *> visible);
   // Shows the lists the current state calls for.
   void ApplyVisibility();
   void SetHeaders(const std::string &sections, const std::string &mods,
@@ -102,7 +102,7 @@ private:
   State ContentState() const;
   // The list that state shows, which the sidebar puts up beside itself so the
   // highlighted section can be read before it is entered.
-  D2AnimeMenu *ContentMenu();
+  AnimeMenu *ContentMenu();
   // Points the preview at a sidebar row, on every cursor move.
   void SyncPreview(int cursor);
   // Hands focus to whichever of the sidebar and the list beside it the pointer
@@ -146,14 +146,14 @@ private:
   bool DiscoverMenus();
   bool MenusReady();
   void ResetMenus();
-  D2AnimeMenu &CurrentSettingsList();
+  AnimeMenu &CurrentSettingsList();
 
   // Every list widget this menu owns: the section sidebar, the mod, DLC,
   // achievement and keybind lists, plus one list per settings page. All point
   // at members, so the array is rebuilt per call rather than cached.
   static constexpr size_t kFixedMenus = 5;
   static constexpr size_t kMenuCount = kSettingsSectionCount + kFixedMenus;
-  std::array<D2AnimeMenu *, kMenuCount> Menus();
+  std::array<AnimeMenu *, kMenuCount> Menus();
 
   State state_ = State::INIT;
   Surface surface_ = Surface::Title;
@@ -170,19 +170,19 @@ private:
   D2AnimeTask task_;
   // Last glyph generation pushed into the footer cap vars (see kFooterGlyphs).
   u32 glyph_gen_ = 0;
-  D2AnimeMenu section_menu_;
-  D2AnimeMenu modlist_menu_;
-  D2AnimeMenu dlclist_menu_;
-  D2AnimeMenu achvlist_menu_;
-  D2AnimeMenu settings_menus_[kSettingsSectionCount];
-  D2AnimeMenu keybind_menu_;
+  AnimeMenu section_menu_;
+  AnimeMenu modlist_menu_;
+  AnimeMenu dlclist_menu_;
+  AnimeMenu achvlist_menu_;
+  AnimeMenu settings_menus_[kSettingsSectionCount];
+  AnimeMenu keybind_menu_;
 
   SettingsPage settings_page_ = SettingsPage::Gameplay;
   SettingAction pad_action_ = SettingAction::PadLayout;
   int capture_index_ = -1;
   bool capture_alt_ = false;
   // Edge detector for the keybind screen's hover-Delete, a host key with no
-  // guest button to edge-gate it.
+  // engine button to edge-gate it.
   bool del_held_ = false;
   // Last keybind grid slot the cursor held outside the spacer band. It tells
   // the spacer nudge which way the cursor was traveling.

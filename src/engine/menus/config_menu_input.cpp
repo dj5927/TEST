@@ -58,7 +58,7 @@ bool ConfigMenu::PointerHop() {
   f32 x = 0.0f;
   switch (state_) {
   case State::SECTION: {
-    D2AnimeMenu *content = ContentMenu();
+    AnimeMenu *content = ContentMenu();
     if (!content || !content->PointerRowX(row, x)) {
       hop_blocked_ = false;
       return false;

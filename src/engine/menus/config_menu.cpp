@@ -12,7 +12,6 @@
 #include "core/logging.h"
 #include "core/memory_helpers.h"
 #include "core/settings_model.h"
-#include "core/task_layout.h"
 #include "engine/achievements/achievement_list.h"
 #include "engine/d2anime/anime_mouse.h"
 #include "engine/d2anime/d2anime.h"
@@ -20,6 +19,7 @@
 #include "engine/glyph_set.h"
 #include "engine/menus/config_layout.h"
 #include "engine/menus/config_menu_data.h"
+#include "engine/task.h"
 #include "platform/platform.h"
 
 #include <algorithm>
@@ -30,10 +30,10 @@
 
 namespace bd::engine {
 
-std::array<D2AnimeMenu *, ConfigMenu::kMenuCount> ConfigMenu::Menus() {
-  std::array<D2AnimeMenu *, kMenuCount> all = {&section_menu_, &modlist_menu_,
-                                               &dlclist_menu_, &achvlist_menu_,
-                                               &keybind_menu_};
+std::array<AnimeMenu *, ConfigMenu::kMenuCount> ConfigMenu::Menus() {
+  std::array<AnimeMenu *, kMenuCount> all = {&section_menu_, &modlist_menu_,
+                                             &dlclist_menu_, &achvlist_menu_,
+                                             &keybind_menu_};
   for (int p = 0; p < kSettingsSectionCount; ++p)
     all[kFixedMenus + p] = &settings_menus_[p];
   return all;
@@ -41,7 +41,7 @@ std::array<D2AnimeMenu *, ConfigMenu::kMenuCount> ConfigMenu::Menus() {
 
 void ConfigMenu::ResetMenus() {
   for (auto *m : Menus())
-    *m = D2AnimeMenu();
+    *m = AnimeMenu();
 }
 
 bool ConfigMenu::MenusReady() {
@@ -51,10 +51,10 @@ bool ConfigMenu::MenusReady() {
   return true;
 }
 
-void ConfigMenu::ShowOnly(std::initializer_list<D2AnimeMenu *> visible) {
+void ConfigMenu::ShowOnly(std::initializer_list<AnimeMenu *> visible) {
   for (auto *m : Menus())
-    m->SetVisible(std::find(visible.begin(), visible.end(), m) !=
-                  visible.end());
+    m->SetVisibleAndPlay(std::find(visible.begin(), visible.end(), m) !=
+                         visible.end());
 }
 
 ConfigMenu::State ConfigMenu::SectionState(int cursor) const {
@@ -75,7 +75,7 @@ ConfigMenu::State ConfigMenu::ContentState() const {
                                   : state_;
 }
 
-D2AnimeMenu *ConfigMenu::ContentMenu() {
+AnimeMenu *ConfigMenu::ContentMenu() {
   switch (ContentState()) {
   case State::SETTINGS:
     return &CurrentSettingsList();
@@ -154,7 +154,7 @@ void ConfigMenu::ApplyVisibility() {
   }
 }
 
-void ConfigMenu::ActivateOnly(D2AnimeMenu *target) {
+void ConfigMenu::ActivateOnly(AnimeMenu *target) {
   for (auto *m : Menus())
     m->SetActive(m == target);
 }
@@ -192,8 +192,7 @@ void ConfigMenu::SetFooter(const FooterLabels &f) {
     layout.ftrB.set(i18n::Text(f.b));
 }
 
-void ConfigMenu::Create(u32 parentTask, Surface surface,
-                        PPCFunc *parentUpdate) {
+void ConfigMenu::Create(Task parent, Surface surface, PPCFunc *parentUpdate) {
   // Before the CSV is generated: its defaults are baked from the catalog.
   i18n::SyncLocale();
 
@@ -212,7 +211,7 @@ void ConfigMenu::Create(u32 parentTask, Surface surface,
   glyph_gen_ = 0;
   ResetMenus();
 
-  task_ = D2AnimeTask::Load(parentTask, "d2anime\\modmgr\\L_modmgr.csv",
+  task_ = D2AnimeTask::Load(parent, "d2anime\\modmgr\\L_modmgr.csv",
                             D2AnimeTask::Reveal::Held);
   if (!task_) {
     BD_ERROR("[config] LoadAsync failed");
@@ -229,11 +228,8 @@ void ConfigMenu::Create(u32 parentTask, Surface surface,
   // in-game the parent is the camp task, whose notify slot is not ours to
   // take.
   if (surface == Surface::Title) {
-    auto *parentBase = bd::mem::at<bd::TaskBase_t>(parentTask);
-    auto *childBase = bd::mem::at<bd::TaskBase_t>(task_.guest_address());
-    parentBase->notifyChild = task_.guest_address();
-    childBase->notifyParent = parentTask;
-    childBase->notifyParentUID = parentBase->taskUID;
+    parent.SetNotifyChild(task_);
+    task_.SetNotifyParent(parent);
   }
 
   active_ = true;
@@ -243,13 +239,13 @@ void ConfigMenu::Create(u32 parentTask, Surface surface,
   // menu otherwise.
   MenuMouse::Get().SetRowFilter([this](u32 listVA, int index) {
     for (int p = 0; p < kSettingsSectionCount; ++p) {
-      if (settings_menus_[p].guest_address() != listVA)
+      if (settings_menus_[p].Address() != listVA)
         continue;
       return SettingsSlotToRow(static_cast<SettingsPage>(p), index) >= 0;
     }
     return true;
   });
-  BD_DEBUG("[config] child task at 0x{:08X}", task_.guest_address());
+  BD_DEBUG("[config] child task at 0x{:08X}", task_.Address());
 }
 
 void ConfigMenu::Destroy() {
@@ -268,21 +264,12 @@ void ConfigMenu::Destroy() {
   }
 
   // Clear the parent's notification pointer before Kill so it doesn't dangle.
-  // Both reads validate: Destroy runs from Close on a frame the stock screen
-  // may already have torn the task down, and at() host-faults on a freed
-  // pointer rather than failing. A write of guest 0x31873226 out of here is
-  // what that looks like.
-  if (task_) {
-    const auto *self =
-        bd::mem::try_at<const bd::TaskBase_t>(task_.guest_address());
-    const u32 parent = self ? u32(self->notifyParent) : 0u;
-    if (auto *parentTask = bd::mem::try_at<bd::TaskBase_t>(parent))
-      parentTask->notifyChild = 0u;
-  }
+  if (task_)
+    task_.NotifyParent().ClearNotifyChild();
 
   task_.Kill();
   // A live popup is a child of task_ and dies with it, so drop the handle
-  // without Kill() so no DEAD flag write reaches freed guest memory later.
+  // without Kill() so no DEAD flag write reaches freed engine memory later.
   confirm_popup_.Drop();
   ResetMenus();
 
@@ -328,7 +315,7 @@ void ConfigMenu::Dismiss() {
   BD_DEBUG("[config] dismissed");
 }
 
-D2AnimeMenu &ConfigMenu::CurrentSettingsList() {
+AnimeMenu &ConfigMenu::CurrentSettingsList() {
   int page = static_cast<int>(settings_page_);
   if (page < 0 || page >= kSettingsSectionCount)
     page = 0;
@@ -341,14 +328,13 @@ bool ConfigMenu::DiscoverMenus() {
   if (!task_ || !task_.IsReady())
     return false;
 
-  section_menu_ = task_.FindMenuByName("SltSection");
-  modlist_menu_ = task_.FindMenuByName("ModList");
-  dlclist_menu_ = task_.FindMenuByName("DlcList");
-  achvlist_menu_ = task_.FindMenuByName("AchvList");
+  section_menu_ = task_.FindMenu("SltSection");
+  modlist_menu_ = task_.FindMenu("ModList");
+  dlclist_menu_ = task_.FindMenu("DlcList");
+  achvlist_menu_ = task_.FindMenu("AchvList");
   for (int p = 0; p < kSettingsSectionCount; ++p)
-    settings_menus_[p] =
-        task_.FindMenuByName(ConfigLayout::kSettingsListNames[p]);
-  keybind_menu_ = task_.FindMenuByName("KeybindList");
+    settings_menus_[p] = task_.FindMenu(ConfigLayout::kSettingsListNames[p]);
+  keybind_menu_ = task_.FindMenu("KeybindList");
 
   if (!MenusReady()) {
     ResetMenus();
@@ -364,8 +350,8 @@ bool ConfigMenu::DiscoverMenus() {
 
   BD_DEBUG("[config] discovered menus: section=0x{:08X} modlist=0x{:08X} "
            "dlclist=0x{:08X} ({}mods, {}dlc)",
-           section_menu_.guest_address(), modlist_menu_.guest_address(),
-           dlclist_menu_.guest_address(), ModCount(), DlcCount());
+           section_menu_.Address(), modlist_menu_.Address(),
+           dlclist_menu_.Address(), ModCount(), DlcCount());
 
   return true;
 }
@@ -460,7 +446,7 @@ void ConfigMenu::Transition(State next) {
 
   // Brings up a list with its cursor on it, what every content state does
   // once the panels are settled.
-  const auto open = [](D2AnimeMenu &menu) {
+  const auto open = [](AnimeMenu menu) {
     menu.SetActive(true);
     menu.AttachCursor();
   };
@@ -592,8 +578,7 @@ void ConfigMenu::Transition(State next) {
     } else {
       name = ModAt(delete_index_).name;
     }
-    confirm_popup_.Create(task_.guest_address(),
-                          i18n::Fmt("menu.confirm.delete", name).c_str(),
+    confirm_popup_.Create(task_, i18n::Fmt("menu.confirm.delete", name).c_str(),
                           i18n::Text("menu.confirm.undone").c_str());
     ActivateOnly(nullptr);
     BD_DEBUG("[config] state -> CONFIRM_DELETE ({}[{}] \"{}\")",
@@ -602,11 +587,10 @@ void ConfigMenu::Transition(State next) {
   }
 
   case State::CONFIRM_REBOOT:
-    confirm_popup_.Create(task_.guest_address(),
-                          i18n::Text(bd::platform::IsSteamGameMode()
-                                         ? "menu.confirm.quit"
-                                         : "menu.confirm.restart")
-                              .c_str());
+    confirm_popup_.Create(task_, i18n::Text(bd::platform::IsSteamGameMode()
+                                                ? "menu.confirm.quit"
+                                                : "menu.confirm.restart")
+                                     .c_str());
     ActivateOnly(nullptr);
     BD_DEBUG("[config] state -> CONFIRM_REBOOT");
     break;
@@ -615,8 +599,7 @@ void ConfigMenu::Transition(State next) {
     // The list stays up behind the popup, so its section panels and titles,
     // which every transition clears, have to be put back with it.
     SetKeybindChrome("menu.hint.keybinds");
-    confirm_popup_.Create(task_.guest_address(),
-                          i18n::Text("menu.confirm.reset_binds").c_str(),
+    confirm_popup_.Create(task_, i18n::Text("menu.confirm.reset_binds").c_str(),
                           i18n::Text("menu.confirm.undone").c_str());
     ActivateOnly(nullptr);
     BD_DEBUG("[config] state -> CONFIRM_RESET_BINDS");
@@ -630,7 +613,7 @@ void ConfigMenu::Transition(State next) {
     break;
   }
 
-  layout.SyncVars(task_.guest_address());
+  layout.SyncVars(task_.AnimeData());
   UpdateFooter();
 }
 
@@ -683,7 +666,7 @@ bool ConfigMenu::Prime() {
   const bool ready = task_ && MenusReady();
   if (task_ && task_.IsVisible() != ready) {
     task_.SetVisibleAndPlay(ready);
-    // The guest's own show puts every menu on the task back up, keybind rows
+    // The engine's own show puts every menu on the task back up, keybind rows
     // included, so the state's set goes back on top of it.
     if (ready)
       ApplyVisibility();
@@ -779,7 +762,7 @@ void ConfigMenu::Update(PPCContext &ctx, u8 *base) {
     break;
   }
 
-  GetLayout().SyncVars(task_.guest_address());
+  GetLayout().SyncVars(task_.AnimeData());
 
   // Ahead of the handlers, so a click made as the pointer crosses between the
   // sidebar and the list beside it is read by the one it hit.

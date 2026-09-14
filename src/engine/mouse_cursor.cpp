@@ -23,7 +23,7 @@
 
 // ReXGlue numbers GPR ordinals over integer parameters only, so every register a
 // float argument reserves has to be spelled out as a placeholder for the ones
-// behind it to sit where the guest reads them.
+// behind it to sit where the engine reads them.
 
 namespace bd::engine {
 
@@ -98,7 +98,7 @@ u32 Fade(u32 color, i32 percent) {
   return (alpha << 24) | (color & 0x00FFFFFFu);
 }
 
-// Wall time rather than the guest tick, so the spin stays smooth above 30fps.
+// Wall time rather than the engine tick, so the spin stays smooth above 30fps.
 f32 SpinSeconds() {
   static const auto start = std::chrono::steady_clock::now();
   return std::chrono::duration<f32>(std::chrono::steady_clock::now() - start)
