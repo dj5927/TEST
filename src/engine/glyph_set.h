@@ -97,6 +97,8 @@ public:
   // vars in place of the snapshot the parse took.
   UVRect CellUV(const char *helpName) const;
 
+  UVRect PromptUV(const PromptGlyph &glyph) const;
+
   // The ink band of one key's cap, cut clear of the cell's transparent
   // margins, for a surface that scales the cap well below the footers' 64px.
   // Index is a kBindableKeys position, negative gets the blank cell.

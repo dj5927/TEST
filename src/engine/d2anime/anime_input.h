@@ -10,6 +10,8 @@
 
 #include <rex/types.h>
 
+#include "engine/action_map.h"
+
 namespace bd::engine {
 
 enum class Button : int {
@@ -49,5 +51,9 @@ bool ButtonHeld(Button btn);
 
 // Stick deflection in [-1, 1].
 float StickValue(StickAxis axis);
+
+bool CheckAction(GameAction action);
+bool ActionHeld(GameAction action);
+Button ActionButton(GameAction action);
 
 } // namespace bd::engine

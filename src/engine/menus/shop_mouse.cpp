@@ -42,7 +42,7 @@ bool CountArrowClicked(u32 shopTask) {
     return false;
   // Confirm is the click, since keybind_a carries LMB. The guest's own edge
   // keeps this to the frame the button went down.
-  if (!CheckButton(Button::A))
+  if (!CheckAction(GameAction::Confirm))
     return false;
 
   const u32 state = mem::try_load<u32>(shopTask + kShopState);

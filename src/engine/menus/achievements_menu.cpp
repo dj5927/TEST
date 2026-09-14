@@ -327,7 +327,7 @@ void AchievementsMenu::UpdateRowDesc(int cursor) {
 // both fire on the press, as the Spell Record's cancel branch does in one
 // instruction pair (0x822F7858).
 void AchievementsMenu::HandleList() {
-  if (!CheckButton(Button::B))
+  if (!CheckAction(GameAction::Cancel))
     return;
   sfx::Play(sfx::kCancel);
   StartOutro();

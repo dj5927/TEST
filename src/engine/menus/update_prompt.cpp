@@ -241,7 +241,8 @@ bool UpdatePrompt::Hold(u32 titleTask) {
   }
 
   case Phase::kAppFailed:
-    if (now < deadline_ && !CheckButton(Button::A) && !CheckButton(Button::B))
+    if (now < deadline_ && !CheckAction(GameAction::Confirm) &&
+        !CheckAction(GameAction::Cancel))
       return true;
     notice_.Kill();
     return EnterContentOffer();

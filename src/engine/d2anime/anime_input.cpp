@@ -41,6 +41,19 @@ bool ButtonHeld(Button btn) {
   return SynthesizedButtonHeld(btn);
 }
 
+Button ActionButton(GameAction action) {
+  const int btn = ActionMap::Get().Button(action);
+  if (btn >= 0)
+    return static_cast<Button>(btn);
+  return action == GameAction::Cancel ? Button::B : Button::A;
+}
+
+bool CheckAction(GameAction action) {
+  return CheckButton(ActionButton(action));
+}
+
+bool ActionHeld(GameAction action) { return ButtonHeld(ActionButton(action)); }
+
 float StickValue(StickAxis axis) {
   u32 inputMgr = bd::mem::load<u32>(kInputManagerVA);
   if (!inputMgr)

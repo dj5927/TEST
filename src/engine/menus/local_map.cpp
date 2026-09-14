@@ -448,7 +448,7 @@ void AreaMap::SyncPrompts(bool available) {
     if (gen != glyphGen_) {
       glyphGen_ = gen;
       for (const PromptGlyph &g : kPromptGlyphs) {
-        const UVRect r = Glyphs::Get().CellUV(g.helpName);
+        const UVRect r = Glyphs::Get().PromptUV(g);
         prompts_.SetFloat(g.uv.u0, r.u0);
         prompts_.SetFloat(g.uv.v0, r.v0);
         prompts_.SetFloat(g.uv.u1, r.u1);
@@ -554,7 +554,7 @@ bool AreaMap::Update(u32 screenTask) {
 
   // The footer keeps the screen's own cancel prompt, so cancel has to keep
   // closing the screen. Standing down first hands the frame back intact.
-  if (CheckButton(Button::B)) {
+  if (CheckAction(GameAction::Cancel)) {
     Leave();
     return false;
   }
