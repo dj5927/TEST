@@ -315,14 +315,14 @@ void Glyphs::Rebind() {
     return;
   const u32 bag = cache + kUvBagOffset;
 
-  // One guest block for the eleven names, allocated once and reused across
-  // every camp visit. FindVar takes a guest pointer, so the names have to live
-  // where the guest can read them.
+  // One engine block for the eleven names, allocated once and reused across
+  // every camp visit. FindVar takes an engine pointer, so the names have to live
+  // where the engine can read them.
   if (!nameBlock_) {
     nameBlock_ =
         gpu::HostHeap::Get().AllocGuest(kNameStride * kHelpCells, 16);
     if (!nameBlock_) {
-      BD_WARN("[glyphs] no guest memory for cell names, prompts stay stock");
+      BD_WARN("[glyphs] no engine memory for cell names, prompts stay stock");
       return;
     }
     for (int i = 0; i < kHelpCells; ++i) {
@@ -475,7 +475,7 @@ void Glyphs::Tick() {
   }
 
   // The providers cover every load made from here on, the stamps rewrite the
-  // instances already in guest memory, including one that raced this very
+  // instances already in engine memory, including one that raced this very
   // change through the loader.
   sheetStamp_.Sync(kSheetKey, generation_, [this] { return ComposeSheet(); });
   PromptTextures::Get().Sync(generation_);

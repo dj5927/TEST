@@ -70,7 +70,7 @@ struct InkBox {
 constexpr InkBox kInk64 = {13, 15, 38, 40};
 constexpr InkBox kInkActEv = {42, 14, 172, 92};
 
-// One served texture: the file the guest opens, its shipped dimensions, its cell
+// One served texture: the file the engine opens, its shipped dimensions, its cell
 // grid and the cells in row-major order.
 struct PromptTex {
   const char *key;
