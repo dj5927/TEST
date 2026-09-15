@@ -35,6 +35,7 @@
 #include "engine/play_record.h"
 #include "engine/ply_task.h"
 #include "engine/save/save.h"
+#include "engine/scene_file.h"
 #include "engine/script.h"
 #include "engine/script_man_task.h"
 #include "engine/script_vars.h"

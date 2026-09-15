@@ -306,6 +306,7 @@ void ReblueApp::OnPostInitLogging() {
   bd::engine::GameOptions::Get().Init();
 
   bd::engine::Achievements::Init();
+  bd::engine::Gimmicks::Get().Init();
 
   // Devmode aims dumps and captures at the game folder, which the SDK mounts
   // read-only. Runtime::SetupVfs reads this flag once, after this hook. Moving

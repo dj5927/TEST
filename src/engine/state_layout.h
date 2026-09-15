@@ -72,6 +72,9 @@ inline constexpr u32 kLevelUpFlag = 0x82DC9A94;    // non-zero: leader leveled
 inline constexpr u32 kBattleAICtl = 0x82DC99A0;    // AI/summon ctl (0x578)
 inline constexpr u32 kPreRestartTask =
     0x82DC9A6C; // non-null once a party wipe restarts the game
+inline constexpr u32 kBarrierFlagList =
+    0x82DC4108; // bdFlagListLoad's elemental barrier flags and their colors
+inline constexpr u32 kChestFlagList = 0x82DC4114; // treasure chest flags
 } // namespace addr
 
 } // namespace bd::engine

@@ -26,6 +26,8 @@ constexpr u32 kMaxCategory = 8; // bdStageRecordFindByNumber's own bound
 
 constexpr size_t kStageNameCap = 32;
 
+constexpr u32 kScenePathCap = 0x40;
+
 struct ScaOp_t {
   /* 0x00 */ u8 _pad00[0x10];
   /* 0x10 */ be_u32 group;
@@ -36,12 +38,22 @@ struct Script_t {
   /* 0x000 */ u8 _pad000[0x6C];
   /* 0x06C */ be_u32 category;
   /* 0x070 */ be_u32 combinedNum;
-  /* 0x074 */ u8 _pad074[0x4A8 - 0x074];
+  /* 0x074 */ u8 _pad074[0x160 - 0x074];
+  /* 0x160 */ be_u32 scene;
+  /* 0x164 */ char scenePath[kScenePathCap];
+  /* 0x1A4 */ u8 _pad1A4[0x4A8 - (0x164 + kScenePathCap)];
   /* 0x4A8 */ be_u32 currentOp;
+  /* 0x4AC */ u8 _pad4AC[0x6C8 - 0x4AC];
+  /* 0x6C8 */ be_u32 searchPoints;
+  /* 0x6CC */ be_u32 searchPointCount;
 };
 static_assert(offsetof(Script_t, category) == 0x06C);
 static_assert(offsetof(Script_t, combinedNum) == 0x070);
+static_assert(offsetof(Script_t, scene) == 0x160);
+static_assert(offsetof(Script_t, scenePath) == 0x164);
 static_assert(offsetof(Script_t, currentOp) == 0x4A8);
+static_assert(offsetof(Script_t, searchPoints) == 0x6C8);
+static_assert(offsetof(Script_t, searchPointCount) == 0x6CC);
 
 struct StageRecordVector_t {
   /* 0x00 */ be_u32 owner;
@@ -163,6 +175,36 @@ u32 Script::Sub() const { return CombinedNum() % 100u; }
 ScaOp Script::CurrentOp() const {
   const auto *self = Self<Script_t>();
   return ScaOp(self ? static_cast<u32>(self->currentOp) : 0);
+}
+
+engine::SceneFile Script::Scene() const {
+  const auto *self = Self<Script_t>();
+  return engine::SceneFile(self ? static_cast<u32>(self->scene) : 0);
+}
+
+std::string Script::ScenePath() const {
+  const auto *self = Self<Script_t>();
+  if (!self)
+    return {};
+  size_t len = 0;
+  while (len < kScenePathCap && self->scenePath[len])
+    ++len;
+  return std::string(self->scenePath, len);
+}
+
+u32 Script::SearchPointCount() const {
+  const auto *self = Self<Script_t>();
+  return self ? static_cast<u32>(self->searchPointCount) : 0;
+}
+
+engine::SearchPoint Script::SearchPointAt(u32 index) const {
+  const auto *self = Self<Script_t>();
+  if (!self || index >= static_cast<u32>(self->searchPointCount))
+    return engine::SearchPoint();
+  const u32 first = static_cast<u32>(self->searchPoints);
+  if (!first)
+    return engine::SearchPoint();
+  return engine::SearchPoint(first + index * engine::SearchPoint::kStride);
 }
 
 std::string Script::Name() const {

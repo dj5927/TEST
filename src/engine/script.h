@@ -1,7 +1,8 @@
 /**
  * @file    engine/script.h
  * @brief   The stage script the ScriptManTask is running: its area identity,
- *          and the names built from it.
+ *          the names built from it, and the scene and search points loaded
+ *          under it.
  *
  * @copyright Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
  *            All rights reserved.
@@ -14,6 +15,7 @@
 
 #include <rex/types.h>
 
+#include "engine/scene_file.h"
 #include "engine/task.h"
 
 namespace bd::engine {
@@ -53,6 +55,12 @@ public:
   u32 Sub() const;
 
   ScaOp CurrentOp() const;
+
+  engine::SceneFile Scene() const;
+  std::string ScenePath() const;
+
+  u32 SearchPointCount() const;
+  engine::SearchPoint SearchPointAt(u32 index) const;
 
   // Built the way bdStageNameBuild does, e.g. "bg03_01". Empty when the
   // category has no known prefix.
