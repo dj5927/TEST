@@ -58,7 +58,7 @@ constexpr u32 kVarU1 = 0x30;
 constexpr u32 kVarV1 = 0x34;
 constexpr u32 kVarTypeElement = 0;
 
-// Cell grid of the served sheet, which tools/build_glyph_sheet.py lays out.
+// Cell grid of the served sheet.
 constexpr int kSheetCols = 8;
 constexpr int kSheetRows = 24;
 
@@ -168,8 +168,8 @@ int PadArtCell(PadSet pad, int cellIndex) {
   return kPadSetBase + (set - 1) * kPadSetCells + cellIndex;
 }
 
-// Where tools/build_glyph_sheet.py inks a cap inside its 64px cell, and the
-// wider band it gives the modifier cells.
+// Where a cap inks inside its 64px cell, and the wider band the modifier cells
+// get.
 constexpr f32 kInkX0 = 6.0f / 64.0f;
 constexpr f32 kInkX1 = 44.0f / 64.0f;
 constexpr f32 kInkY0 = 12.0f / 64.0f;
@@ -213,6 +213,21 @@ PadSet HostPadSet() {
     return PadSet::SteamDeck;
   default:
     return PadSet::Xbox360;
+  }
+}
+
+const char *HelpNameForAction(GameAction action) {
+  switch (ActionButton(action)) {
+  case Button::A:
+    return "Help_A_Uv";
+  case Button::B:
+    return "Help_B_Uv";
+  case Button::X:
+    return "Help_X_Uv";
+  case Button::Y:
+    return "Help_Y_Uv";
+  default:
+    return nullptr;
   }
 }
 
@@ -300,14 +315,14 @@ void Glyphs::Rebind() {
     return;
   const u32 bag = cache + kUvBagOffset;
 
-  // One guest block for the eleven names, allocated once and reused across
-  // every camp visit. FindVar takes a guest pointer, so the names have to live
-  // where the guest can read them.
+  // One engine block for the eleven names, allocated once and reused across
+  // every camp visit. FindVar takes an engine pointer, so the names have to live
+  // where the engine can read them.
   if (!nameBlock_) {
     nameBlock_ =
         gpu::HostHeap::Get().AllocGuest(kNameStride * kHelpCells, 16);
     if (!nameBlock_) {
-      BD_WARN("[glyphs] no guest memory for cell names, prompts stay stock");
+      BD_WARN("[glyphs] no engine memory for cell names, prompts stay stock");
       return;
     }
     for (int i = 0; i < kHelpCells; ++i) {
@@ -334,6 +349,15 @@ void Glyphs::WriteCell(u32 va, int cell) const {
   mem::try_store<f32>(va + kVarU1, r.u1);
   mem::try_store<f32>(va + kVarV1, r.v1);
   GlyphCommitVar(va);
+}
+
+UVRect Glyphs::PromptUV(const PromptGlyph &glyph) const {
+  const char *name = nullptr;
+  if (std::strcmp(glyph.helpName, "Help_A_Uv") == 0)
+    name = HelpNameForAction(GameAction::Confirm);
+  else if (std::strcmp(glyph.helpName, "Help_B_Uv") == 0)
+    name = HelpNameForAction(GameAction::Cancel);
+  return CellUV(name ? name : glyph.helpName);
 }
 
 UVRect Glyphs::CellUV(const char *helpName) const {
@@ -451,7 +475,7 @@ void Glyphs::Tick() {
   }
 
   // The providers cover every load made from here on, the stamps rewrite the
-  // instances already in guest memory, including one that raced this very
+  // instances already in engine memory, including one that raced this very
   // change through the loader.
   sheetStamp_.Sync(kSheetKey, generation_, [this] { return ComposeSheet(); });
   PromptTextures::Get().Sync(generation_);

@@ -21,4 +21,10 @@ namespace bd::platform {
 bool CreateDesktopShortcut(const std::filesystem::path &target,
                            std::string_view name, std::string &error);
 
+// Repoints an existing desktop shortcut at target, so switching backends does
+// not leave the shortcut starting the other executable. True and no work when
+// no shortcut is on the desktop: one the user declined stays declined.
+bool RetargetDesktopShortcut(const std::filesystem::path &target,
+                             std::string_view name, std::string &error);
+
 } // namespace bd::platform

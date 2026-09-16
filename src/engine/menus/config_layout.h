@@ -377,7 +377,7 @@ public:
   static constexpr int kSectionCount =
       static_cast<int>(std::size(kSectionKeys));
 
-  // Guest names of the per-page settings menus, indexed by SettingsPage.
+  // Engine names of the per-page settings menus, indexed by SettingsPage.
   static constexpr const char *kSettingsListNames[kSettingsSectionCount] = {
       "GameplayList", "DisplayList", "GraphicsList", "AudioList",
       "ControlsList"};

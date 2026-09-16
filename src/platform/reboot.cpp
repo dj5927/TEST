@@ -239,8 +239,9 @@ bool RelaunchSelf(bool repair) {
   return SpawnReplacement(ExecutablePath(), repair);
 }
 
-[[noreturn]] void PerformWarmReboot(const std::function<void()> &quiesce) {
-  auto exe = ExecutablePath();
+[[noreturn]] void PerformWarmReboot(const std::function<void()> &quiesce,
+                                    std::filesystem::path exe) {
+  const auto target = exe.empty() ? ExecutablePath() : std::move(exe);
 
   // 1. Settings are not auto-persisted, so write them before relaunch.
   rex::cvar::SaveConfig(ConfigFilePath());
@@ -262,7 +263,7 @@ bool RelaunchSelf(bool repair) {
 
   // 4. Spawn after the drain: if it fails there is nothing left to render with,
   //    so this is a hard failure rather than the old stay-in-session fallback.
-  if (!SpawnReplacement(exe, false)) {
+  if (!SpawnReplacement(target, false)) {
     BD_ERROR("[reboot] relaunch failed after teardown, exiting");
     rex::FlushLogging();
     std::_Exit(1);

@@ -29,7 +29,7 @@ namespace bd::engine {
 
 namespace {
 
-// VarBagSetColor takes 0xAARRGGBB.
+// SetColor takes 0xAARRGGBB.
 constexpr u32 kWhite = 0xFFFFFFFFu;
 constexpr u32 kHighlightYellow = 0xFFFFDC00; // restart-bound and capturing
 constexpr u32 kReorderGold = 0xFFFFD700;     // the row being carried
@@ -266,13 +266,13 @@ void ConfigMenu::UpdateFooter() {
     break;
   }
 
-  GetLayout().SyncVars(task_.guest_address());
+  GetLayout().SyncVars(task_.AnimeData());
 }
 
 void ConfigMenu::PopulateNames() {
   const auto sections = static_cast<size_t>(GetLayout().SectionCount());
-  section_menu_.ForEachRow(sections, [&](int, int i, u32 vb) {
-    VarBagSetText(vb, "Name", i18n::Text(ConfigLayout::kSectionKeys[i]));
+  section_menu_.ForEachRow(sections, [&](int, int i, AnimeData vb) {
+    vb.SetText("Name", i18n::Text(ConfigLayout::kSectionKeys[i]));
   });
 
   // The trailing slots of a short list take the empty-list notice rather than
@@ -281,23 +281,21 @@ void ConfigMenu::PopulateNames() {
   const State content = ContentState();
   if (content == State::MODLIST || content == State::REORDER) {
     const size_t modCount = ModCount();
-    modlist_menu_.ForEachSlot([&](int, int i, u32 vb) {
+    modlist_menu_.ForEachSlot([&](int, int i, AnimeData vb) {
       if (i < static_cast<int>(modCount))
-        VarBagSetText(vb, "Name", ModAt(i).name);
+        vb.SetText("Name", ModAt(i).name);
       else
-        VarBagSetText(vb, "Name",
-                      modCount == 0 ? i18n::Text("menu.list.no_mods")
-                                    : std::string());
+        vb.SetText("Name", modCount == 0 ? i18n::Text("menu.list.no_mods")
+                                         : std::string());
     });
   } else if (content == State::DLCLIST) {
     auto &dlc = DLC();
-    dlclist_menu_.ForEachSlot([&](int, int i, u32 vb) {
+    dlclist_menu_.ForEachSlot([&](int, int i, AnimeData vb) {
       if (i < static_cast<int>(dlc.Count()))
-        VarBagSetText(vb, "Name", dlc.At(static_cast<size_t>(i)).display_name);
+        vb.SetText("Name", dlc.At(static_cast<size_t>(i)).display_name);
       else
-        VarBagSetText(vb, "Name",
-                      dlc.Count() == 0 ? i18n::Text("menu.list.no_dlc")
-                                       : std::string());
+        vb.SetText("Name", dlc.Count() == 0 ? i18n::Text("menu.list.no_dlc")
+                                            : std::string());
     });
   } else if (content == State::ACHVLIST) {
     AchievementRowTemplate::PopulateNames(achvlist_menu_);
@@ -312,7 +310,7 @@ void ConfigMenu::RefreshModVisuals() {
   const u32 enColor = modlist_menu_.EnableColor();
   const u32 disColor = modlist_menu_.DisableColor();
 
-  modlist_menu_.ForEachRow(ModCount(), [&](int slot, int i, u32 vb) {
+  modlist_menu_.ForEachRow(ModCount(), [&](int slot, int i, AnimeData vb) {
     const bool enabled = ModIsEnabled(i);
     const bool carried = state_ == State::REORDER && i == reorder_origin_;
     modlist_menu_.SetToggleRow(
@@ -325,7 +323,7 @@ void ConfigMenu::RefreshDLCVisuals() {
   const u32 enColor = dlclist_menu_.EnableColor();
   const u32 disColor = dlclist_menu_.DisableColor();
 
-  dlclist_menu_.ForEachRow(DLC().Count(), [&](int slot, int i, u32 vb) {
+  dlclist_menu_.ForEachRow(DLC().Count(), [&](int slot, int i, AnimeData vb) {
     const bool enabled = IsDLCEnabled(i);
     dlclist_menu_.SetToggleRow(slot, vb, enabled,
                                enabled ? enColor : disColor);
@@ -339,35 +337,34 @@ void ConfigMenu::RefreshDLCVisuals() {
 void ConfigMenu::RefreshSettingsVisuals() {
   const auto page = settings_page_;
 
-  const auto hideButtons = [](u32 vb) {
+  const auto hideButtons = [](AnimeData vb) {
     for (const auto &opt : kSettingOptVars)
-      VarBagSetFloat(vb, opt.vis, -1.0);
+      vb.SetFloat(opt.vis, -1.0);
   };
 
-  CurrentSettingsList().ForEachRow(SettingsSlotCount(page), [&](int, int slot,
-                                                                u32 vb) {
+  const auto row = [&](int, int slot, AnimeData vb) {
     const int i = SettingsSlotToRow(page, slot);
     if (i < 0) {
       hideButtons(vb);
-      VarBagSetFloat(vb, "SldVis", -1.0);
-      VarBagSetFloat(vb, "RowVis", -1.0);
-      VarBagSetFloat(vb, "HdrVis", 1.0);
-      VarBagSetText(vb, "Hdr", SettingsSlotHeader(page, slot));
+      vb.SetFloat("SldVis", -1.0);
+      vb.SetFloat("RowVis", -1.0);
+      vb.SetFloat("HdrVis", 1.0);
+      vb.SetText("Hdr", SettingsSlotHeader(page, slot));
       return;
     }
-    VarBagSetFloat(vb, "RowVis", 1.0);
-    VarBagSetFloat(vb, "HdrVis", -1.0);
+    vb.SetFloat("RowVis", 1.0);
+    vb.SetFloat("HdrVis", -1.0);
 
     const auto ui = SettingsRowUi(page, i);
     const bool slider = ui == RowUi::Slider || ui == RowUi::SliderSteps;
     const bool disabled = SettingsDisabled(page, i);
-    VarBagSetText(vb, "Name", SettingsLabel(page, i));
-    VarBagSetColor(vb, "LblCol",
-                   SettingsRestartBound(page, i) ? kHighlightYellow : kWhite);
-    VarBagSetFloat(vb, "Dim", DimFor(disabled));
+    vb.SetText("Name", SettingsLabel(page, i));
+    vb.SetColor("LblCol",
+                SettingsRestartBound(page, i) ? kHighlightYellow : kWhite);
+    vb.SetFloat("Dim", DimFor(disabled));
     const int rowOpts =
         ui == RowUi::Action ? 1 : SettingsOptionCount(page, i);
-    VarBagSetFloat(vb, "RowW", SettingItemTemplate::RowWidth(slider, rowOpts));
+    vb.SetFloat("RowW", SettingItemTemplate::RowWidth(slider, rowOpts));
 
     if (slider) {
         hideButtons(vb);
@@ -380,23 +377,23 @@ void ConfigMenu::RefreshSettingsVisuals() {
         const double fill = frac * SettingItemTemplate::kSliderWidth;
         const double thumbTravelOffset = kThumbMargin + (frac * kThumbTravel);
 
-        VarBagSetFloat(vb, "SldVis", 1.0);
-        VarBagSetFloat(vb, "SldFill", fill);
-        VarBagSetFloat(vb, "SldRate", frac);
-        VarBagSetFloat(vb, "SldThumbTravel", thumbTravelOffset);
-        VarBagSetText(vb, "SldVal", SettingsValueText(page, i));
+        vb.SetFloat("SldVis", 1.0);
+        vb.SetFloat("SldFill", fill);
+        vb.SetFloat("SldRate", frac);
+        vb.SetFloat("SldThumbTravel", thumbTravelOffset);
+        vb.SetText("SldVal", SettingsValueText(page, i));
         return;
     }
 
-    VarBagSetFloat(vb, "SldVis", -1.0);
+    vb.SetFloat("SldVis", -1.0);
 
     if (ui == RowUi::Action) {
       hideButtons(vb);
       const auto &opt = kSettingOptVars[0];
-      VarBagSetFloat(vb, opt.vis, 1.0);
-      VarBagSetText(vb, opt.name, i18n::Text("footer.configure"));
-      VarBagSetString(vb, opt.wnd, "BTN01_OF");
-      VarBagSetFloat(vb, opt.dim, DimFor(disabled));
+      vb.SetFloat(opt.vis, 1.0);
+      vb.SetText(opt.name, i18n::Text("footer.configure"));
+      vb.SetString(opt.wnd, "BTN01_OF");
+      vb.SetFloat(opt.dim, DimFor(disabled));
       return;
     }
 
@@ -416,17 +413,18 @@ void ConfigMenu::RefreshSettingsVisuals() {
     for (int k = 0; k < SettingItemTemplate::kMaxOpts; ++k) {
       const auto &opt = kSettingOptVars[k];
       if (k >= optCount) {
-        VarBagSetFloat(vb, opt.vis, -1.0);
+        vb.SetFloat(opt.vis, -1.0);
         continue;
       }
-      VarBagSetFloat(vb, opt.vis, 1.0);
-      VarBagSetText(vb, opt.name, SettingsOptionText(page, i, k));
-      VarBagSetString(vb, opt.wnd,
-                      (!disabled && k == sel) ? "BTN01_ON" : "BTN01_OF");
-      VarBagSetFloat(vb, opt.dim,
-                     DimFor(disabled || SettingsOptionDisabled(page, i, k)));
+      vb.SetFloat(opt.vis, 1.0);
+      vb.SetText(opt.name, SettingsOptionText(page, i, k));
+      vb.SetString(opt.wnd, (!disabled && k == sel) ? "BTN01_ON" : "BTN01_OF");
+      vb.SetFloat(opt.dim,
+                  DimFor(disabled || SettingsOptionDisabled(page, i, k)));
     }
-  });
+  };
+
+  CurrentSettingsList().ForEachRow(SettingsSlotCount(page), row);
 }
 
 // Keybind rows: label + the bound key's cap art, with a modifier prefix drawn
@@ -453,18 +451,18 @@ void ConfigMenu::RefreshKeybindVisuals() {
     keybind_menu_.PointerRowX(hoverSlot, hoverX);
 
   const int count = static_cast<int>(SettingsCount(page));
-  keybind_menu_.ForEachTemplate([&](int gridSlot, u32 vb) {
+  keybind_menu_.ForEachTemplate([&](int gridSlot, AnimeData vb) {
     const int i = KeybindSlotToIndex(gridSlot);
     if (i < 0 || i >= count) {
-      VarBagSetText(vb, "Name", "");
-      VarBagSetString(vb, "WndType", "NOWINDOW");
-      VarBagSetFloat(vb, "RowVis", -1.0);
+      vb.SetText("Name", "");
+      vb.SetString("WndType", "NOWINDOW");
+      vb.SetFloat("RowVis", -1.0);
       for (const char *wnd : {"KeyWnd", "KeyWnd2"})
-        VarBagSetString(vb, wnd, "NOWINDOW");
+        vb.SetString(wnd, "NOWINDOW");
       for (const char *text : {"Key", "Key2"})
-        VarBagSetText(vb, text, "");
+        vb.SetText(text, "");
       for (const char *vis : {"KeyCap", "KeyCap2", "KeyPair", "KeyPair2"})
-        VarBagSetFloat(vb, vis, -1.0);
+        vb.SetFloat(vis, -1.0);
       return;
     }
     const bool disabled = SettingsDisabled(page, i);
@@ -472,15 +470,15 @@ void ConfigMenu::RefreshKeybindVisuals() {
         state_ == State::KEYBIND_CAPTURE && i == capture_index_;
     const bool hovered = gridSlot == hoverSlot && !disabled;
 
-    VarBagSetText(vb, "Name", SettingsLabel(page, i));
-    VarBagSetFloat(vb, "Dim", DimFor(disabled));
-    VarBagSetFloat(vb, "RowVis", 1.0);
+    vb.SetText("Name", SettingsLabel(page, i));
+    vb.SetFloat("Dim", DimFor(disabled));
+    vb.SetFloat("RowVis", 1.0);
 
     const auto setUv = [&](const char *uvVar, const UVRect &r) {
-      VarBagSetFloat(vb, fmt::format("{}.x", uvVar).c_str(), r.u0);
-      VarBagSetFloat(vb, fmt::format("{}.y", uvVar).c_str(), r.v0);
-      VarBagSetFloat(vb, fmt::format("{}.w", uvVar).c_str(), r.u1);
-      VarBagSetFloat(vb, fmt::format("{}.h", uvVar).c_str(), r.v1);
+      vb.SetFloat(fmt::format("{}.x", uvVar).c_str(), r.u0);
+      vb.SetFloat(fmt::format("{}.y", uvVar).c_str(), r.v0);
+      vb.SetFloat(fmt::format("{}.w", uvVar).c_str(), r.u1);
+      vb.SetFloat(fmt::format("{}.h", uvVar).c_str(), r.v1);
     };
 
     const auto slot = [&](bool alt, const char *textVar, const char *wndVar,
@@ -519,19 +517,19 @@ void ConfigMenu::RefreshKeybindVisuals() {
           text = alt ? SettingsKeybindAlt(page, i) : SettingsValueText(page, i);
       }
 
-      VarBagSetText(vb, textVar, text);
-      VarBagSetFloat(vb, capVar, key >= 0 && mod < 0 ? 1.0 : -1.0);
-      VarBagSetFloat(vb, pairVar, key >= 0 && mod >= 0 ? 1.0 : -1.0);
+      vb.SetText(textVar, text);
+      vb.SetFloat(capVar, key >= 0 && mod < 0 ? 1.0 : -1.0);
+      vb.SetFloat(pairVar, key >= 0 && mod >= 0 ? 1.0 : -1.0);
       if (key >= 0) {
         setUv(uvVar, Glyphs::KeyArtUV(key));
         if (mod >= 0)
           setUv(modUvVar, Glyphs::ModifierArtUV(mod));
       }
-      VarBagSetString(vb, wndVar,
-                      alt && token.empty() && !on && !offered ? "NOWINDOW"
-                      : on                                    ? "BTN01_ON"
-                                                              : "BTN01_OF");
-      VarBagSetColor(vb, colVar, on ? kHighlightYellow : kWhite);
+      vb.SetString(wndVar,
+                   alt && token.empty() && !on && !offered ? "NOWINDOW"
+                   : on                                    ? "BTN01_ON"
+                                                           : "BTN01_OF");
+      vb.SetColor(colVar, on ? kHighlightYellow : kWhite);
     };
     slot(false, "Key", "KeyWnd", "KeyCol", "KeyCap", "KeyUv", "KeyPair",
          "KeyModUv");
@@ -542,7 +540,7 @@ void ConfigMenu::RefreshKeybindVisuals() {
     // the hovered row holding its box open as the add-alternate target.
     const bool pair = !SettingsKeybindToken(page, i, true).empty() ||
                       (capturing && capture_alt_) || hovered;
-    VarBagSetFloat(vb, "RowW", pair ? kKeybindRowPairW : kKeybindRowSoloW);
+    vb.SetFloat("RowW", pair ? kKeybindRowPairW : kKeybindRowSoloW);
   });
 }
 

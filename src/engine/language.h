@@ -35,8 +35,8 @@ public:
   Locale() = default;
   explicit Locale(u32 id) : id_(id) {}
 
-  // XLanguage id (1..12, host side) mapped through the guest's
-  // g_xLangToBdLocaleJumpOffsets. Out of range yields JP, as the guest does.
+  // XLanguage id (1..12, host side) mapped through the engine's
+  // g_xLangToBdLocaleJumpOffsets. Out of range yields JP, as the engine does.
   static Locale FromXLanguage(u32 xlang);
 
   u32 Id() const { return id_; }
@@ -58,7 +58,7 @@ public:
   // False until bd_boot.ini has been parsed, i.e. no locale is declared.
   explicit operator bool() const;
 
-  Locale Current() const; // g_bdLocaleId, what the guest latched
+  Locale Current() const; // g_bdLocaleId, what the engine latched
   Locale Default() const; // [DefaultLanguage]
   bool IsAvailable(Locale l) const;
   u32 AvailableMask() const; // bit i set means locale i is on [Language]

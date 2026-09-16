@@ -7,9 +7,9 @@
  * @license   BSD 3-Clause License
  *            See LICENSE file in the project root for full license text.
  */
-#include "core/memory_helpers.h"
 #include "engine/d2anime/anime_mouse.h"
 #include "engine/d2anime/d2anime.h"
+#include "engine/menus/shop_main_task.h"
 #include "engine/virtual_buttons.h"
 #include "reblue_init.h"
 
@@ -22,11 +22,6 @@ namespace bd::engine {
 
 namespace {
 
-// Shop::MainTask keeps a menu per state in a table at +184, indexed by the
-// state at +0x6C the same way its handlers reach it.
-constexpr u32 kShopState = 0x6C;
-constexpr u32 kShopStateMenus = 184;
-
 // Where L_shp_buy_itmbtn.csv and its selling twin draw the two cur_01 arrows,
 // in the row template's own coordinates. Each band spans both blink frames.
 constexpr f32 kDownArrowX0 = 470.0f;
@@ -36,22 +31,16 @@ constexpr f32 kUpArrowX1 = 542.0f;
 
 // The count moves on left and right, which a mouse has neither of, so a click
 // on the arrows the row already draws is queued as the pad press the handler
-// waits for. The guest keeps its own clamping, sound and redraw that way.
-bool CountArrowClicked(u32 shopTask) {
+// waits for. The engine keeps its own clamping, sound and redraw that way.
+bool CountArrowClicked(const ShopMainTask &shop) {
   if (!MenuMouse::Get().PointerActive())
     return false;
-  // Confirm is the click, since keybind_a carries LMB. The guest's own edge
+  // Confirm is the click, since keybind_a carries LMB. The engine's own edge
   // keeps this to the frame the button went down.
-  if (!CheckButton(Button::A))
+  if (!CheckAction(GameAction::Confirm))
     return false;
 
-  const u32 state = mem::try_load<u32>(shopTask + kShopState);
-  const u32 menuVA =
-      mem::try_load<u32>(shopTask + kShopStateMenus + state * sizeof(u32));
-  if (!menuVA)
-    return false;
-
-  D2AnimeMenu menu(menuVA);
+  AnimeMenu menu = shop.StateMenu();
   if (!menu)
     return false;
 
@@ -76,8 +65,8 @@ bool CountArrowClicked(u32 shopTask) {
 // Skipping the handler eats the confirm edge the same click would otherwise
 // also be, so an arrow click steps the count instead of buying.
 REX_HOOK_RAW(Shop__MainTask__UpdateCount) {
-  const u32 shopTask = ctx.r3.u32;
-  if (bd::engine::CountArrowClicked(shopTask))
+  const bd::engine::ShopMainTask shop(ctx.r3.u32);
+  if (bd::engine::CountArrowClicked(shop))
     return;
   __imp__Shop__MainTask__UpdateCount(ctx, base);
 }

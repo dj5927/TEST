@@ -1,7 +1,7 @@
 /**
  * @file    engine/game_options.h
  * @brief   The stock game options: the values BD kept in the save block, read
- *          and written as the guest globals the engine actually consults.
+ *          and written as the engine globals the engine actually consults.
  * @license BSD 3-Clause, see LICENSE
  */
 #pragma once
@@ -10,7 +10,7 @@
 
 namespace bd::engine {
 
-// True once the guest address space exists. Every accessor below reads as zero
+// True once the engine address space exists. Every accessor below reads as zero
 // before that, and reads the engine's defaults between then and
 // bdGameConfigInit.
 bool GameOptionsResolved();
@@ -22,16 +22,16 @@ public:
   // Once at startup, after rex::cvar::LoadConfig has run.
   void Init();
 
-  // Lays the global set over the guest globals, the mixer buses and the
+  // Lays the global set over the engine globals, the mixer buses and the
   // renderer's copies.
   void Apply();
 
-  // Overwrites the config range of the save block the guest is about to read.
+  // Overwrites the config range of the save block the engine is about to read.
   // Called from the bdSaveBlockRestoreConfig hook, which then lets the original
-  // run so the guest applies its own mirrors.
+  // run so the engine applies its own mirrors.
   void WriteBlock();
 
-  // The load screen has a voice picker of its own, and it writes the guest
+  // The load screen has a voice picker of its own, and it writes the engine
   // global after the restore. Called from the same hook once the original has
   // run, so the global set takes that choice instead of pushing the previous
   // one back the next time an option changes.

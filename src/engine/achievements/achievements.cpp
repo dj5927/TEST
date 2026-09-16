@@ -16,8 +16,7 @@
 #include "embedded.h"
 #include "core/logging.h"
 #include "engine/events.h"
-#include "engine/field.h"
-#include "engine/inventory.h"
+#include "engine/game.h"
 
 namespace bd::engine {
 
@@ -110,10 +109,10 @@ void Unlock(u32 id) {
 // gold never crossed the line, only that it had crossed it at one of the
 // moments something looked.
 void EvaluateLevelTriggered() {
-  if (Inventory{}.Gold() >= kGoldForCashman)
+  if (Game::Get().ItemSaveData().Gold() >= kGoldForCashman)
     Unlock(kCashman);
-  const Field field;
-  if (field && field.NothingsCollected() >= kNothingsForFungusCollector)
+  const ScriptVars vars = Game::Get().ScriptManTask().Vars();
+  if (vars && vars.NothingsCollected() >= kNothingsForFungusCollector)
     Unlock(kFungusCollector);
 }
 
@@ -153,10 +152,10 @@ void Achievements::Init() {
 
   Events::Subscribe<StageLoaded>([](const StageLoaded &e) {
     Register();
-    // e.stage, never e.field.Stage(): the guest appends the incoming Script
-    // task at the tail of its chain, so the field still resolves the outgoing
-    // stage here.
-    s_stage = e.stage.Name();
+    // e.script, never the ScriptManTask's own: the engine appends the
+    // incoming Script at the tail of its chain, so the root still resolves the
+    // outgoing stage here.
+    s_stage = e.script.Name();
     EvaluateStageTriggered();
   });
 
@@ -178,7 +177,7 @@ void Achievements::Init() {
   });
 
   Events::Subscribe<EnemyKilled>([](const EnemyKilled &e) {
-    if (e.enemy.TypeId() == kPooSnakeTypeId)
+    if (e.enemy.Chara().TypeId() == kPooSnakeTypeId)
       Unlock(kCloacaMaxima);
   });
 

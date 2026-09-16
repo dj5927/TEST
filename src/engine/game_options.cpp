@@ -10,10 +10,11 @@
 #include <rex/cvar.h>
 #include <rex/hook.h>
 
-#include "core/global_config.h"
 #include "core/logging.h"
 #include "core/memory_helpers.h"
 #include "core/settings.h" // kCvarGroup
+#include "engine/config.h"
+#include "engine/visual_render.h"
 #include "platform/platform.h"
 
 REX_EXTERN(__imp__bdSaveBlockRestoreConfig);
@@ -110,7 +111,6 @@ inline constexpr u32 kSoundBusDefault = 0x82774488;
 inline constexpr u32 kSoundBusMusic = 0x8277448C;
 inline constexpr u32 kSoundBusVoice = 0x82774490;
 inline constexpr u32 kSeMixLevel = 0x827744DC;
-inline constexpr u32 kVisualRender = 0x82DC9848;
 } // namespace addr
 
 namespace {
@@ -153,12 +153,6 @@ constexpr u32 kWriteBlockOffset = 55208;
 constexpr u32 kReadBlockOffset = 9528;
 constexpr u32 kBlockSelector = 100896;
 
-// Into g_pVisualRender, and into the global config for the camera.
-constexpr u32 kRenderBrightness = 0x1B2C;
-constexpr u32 kRenderBrightnessChannels = 3;
-constexpr u32 kRenderScreenPosX = 0x1B44;
-constexpr u32 kRenderScreenPosY = 0x1B48;
-
 // A level runs -1 to 1 and reaches the mixer as (level + 1) scaled per bus.
 constexpr f64 kSeBusScale = 0.75;
 constexpr f64 kSeMixScale = 0.5;
@@ -181,7 +175,7 @@ bool StoreFloat(u32 va, f64 value) {
 }
 
 // Set while a setter writes its own cvar, so the change callback does not push
-// the value back into the guest before the setter has compared against it.
+// the value back into the engine before the setter has compared against it.
 bool s_selfWrite = false;
 
 template <typename T> bool WriteCvar(const char *name, T v) {
@@ -221,26 +215,22 @@ void ApplyMixer() {
 
 // These copies are what gets read back, never the globals.
 void ApplyMirrors() {
-  if (auto *cfg = GetGlobalConfig())
-    cfg->camRollInv = static_cast<u32>(REXCVAR_GET(bd_opt_camera));
+  Config::Get().SetCamRollInv(static_cast<u32>(REXCVAR_GET(bd_opt_camera)));
 
-  const u32 render = bd::mem::try_load<u32>(addr::kVisualRender);
+  VisualRender render = VisualRender::Get();
   if (!render)
     return;
 
   const auto brightness = static_cast<f32>(REXCVAR_GET(bd_opt_brightness));
-  for (u32 i = 0; i < kRenderBrightnessChannels; ++i)
-    bd::mem::try_store<f32>(render + kRenderBrightness + i * sizeof(f32),
-                            brightness);
-  bd::mem::try_store<f32>(
-      render + kRenderScreenPosX,
+  for (u32 i = 0; i < VisualRender::kBrightnessChannels; ++i)
+    render.SetBrightness(i, brightness);
+  render.SetScreenPosX(
       static_cast<f32>(REXCVAR_GET(bd_opt_screen_pos_x) * kScreenPosXScale));
-  bd::mem::try_store<f32>(
-      render + kRenderScreenPosY,
+  render.SetScreenPosY(
       static_cast<f32>(REXCVAR_GET(bd_opt_screen_pos_y) * kScreenPosYScale));
 }
 
-// Pushes the global set into the guest globals. A no-op before the address
+// Pushes the global set into the engine globals. A no-op before the address
 // space exists.
 void AdoptCvars() {
   StoreInt(addr::kMsgSpeed, REXCVAR_GET(bd_opt_msg_speed));
@@ -285,9 +275,9 @@ GameOptions &GameOptions::Get() {
   return s;
 }
 
-// Lays the global set over the block the guest is about to read, so whatever the
+// Lays the global set over the block the engine is about to read, so whatever the
 // save file carried is replaced before bdSaveBlockRestoreConfig consults it.
-// Every mirror the restore performs stays the guest's.
+// Every mirror the restore performs stays the engine's.
 void GameOptions::WriteBlock() {
   const u32 base = ReadBlockBase();
   if (!base)
@@ -331,9 +321,9 @@ void GameOptions::AdoptVoiceType() {
 }
 
 void GameOptions::Init() {
-  // The guest has not booted yet, so this pushes nothing. It is the change
+  // The engine has not booted yet, so this pushes nothing. It is the change
   // callback that matters here: a console or config file write reaches the
-  // guest globals the same way a menu edit does.
+  // engine globals the same way a menu edit does.
   for (const char *name : kOptionCvars)
     rex::cvar::RegisterChangeCallback(
         name, [](std::string_view, std::string_view) {

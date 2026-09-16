@@ -46,7 +46,7 @@ inline constexpr int kGameActionCount = 15;
 // Stable identifier, also the tail of the row's i18n key.
 const char *ToString(GameAction action);
 
-// Live view of the guest's table. Every accessor re-reads guest memory, so a
+// Live view of the engine's table. Every accessor re-reads engine memory, so a
 // change to the camp Config controller type option is picked up immediately and
 // nothing here caches a mapping that the player can move.
 class ActionMap {
@@ -66,7 +66,7 @@ private:
   ActionMap() = default;
 
   // Byte address of the fifteen-entry row for the player's controller type, or
-  // zero when the guest image is not up yet.
+  // zero when the engine image is not up yet.
   u32 Row() const;
 };
 

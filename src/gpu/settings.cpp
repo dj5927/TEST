@@ -53,11 +53,13 @@ REXCVAR_DEFINE_BOOL(bd_scene_color_r11g11b10, false, kCvarGroup,
                     "no alpha channel, 6/6/5-bit mantissas. Requires "
                     "restart.");
 
-REXCVAR_DEFINE_INT32(bd_anisotropy, 0, kCvarGroup,
+REXCVAR_DEFINE_INT32(bd_anisotropy, bd::gpu::kDefaultSettings.anisotropy,
+                     kCvarGroup,
                      "Anisotropic texture filtering level.")
     .range(0, 16);
 
-REXCVAR_DEFINE_INT32(bd_supersampling, 1, kCvarGroup,
+REXCVAR_DEFINE_INT32(bd_supersampling, bd::gpu::kDefaultSettings.superSampling,
+                     kCvarGroup,
                      "Render the scene at 2x the output resolution and "
                      "downsample. 1 = off, 2 = on. Requires restart.")
     .range(1, 2)
@@ -68,7 +70,7 @@ REXCVAR_DEFINE_INT32(bd_supersampling, 1, kCvarGroup,
     })
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(bd_msaa, 0, kCvarGroup,
+REXCVAR_DEFINE_INT32(bd_msaa, bd::gpu::kDefaultSettings.msaa, kCvarGroup,
                      "MSAA sample count for the 3D scene: 0 = off, 2, 4, 8. "
                      "Clamped to device support. Requires restart.")
     .range(0, 8)
@@ -79,7 +81,8 @@ REXCVAR_DEFINE_INT32(bd_msaa, 0, kCvarGroup,
     })
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(bd_render_scale, 50, kCvarGroup,
+REXCVAR_DEFINE_INT32(bd_render_scale, bd::gpu::kDefaultSettings.renderScale,
+                     kCvarGroup,
                      "Percent of the output resolution the 3D scene renders "
                      "at, upscaled at present. 100 renders at the output "
                      "resolution, and the design canvas of 1280x720 is the "
@@ -89,7 +92,8 @@ REXCVAR_DEFINE_INT32(bd_render_scale, 50, kCvarGroup,
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(bd_post_quality,
-                     static_cast<i32>(bd::gpu::PostQuality::Low), kCvarGroup,
+                     static_cast<i32>(bd::gpu::kDefaultSettings.postQuality),
+                     kCvarGroup,
                      "Resolution the bloom and depth-of-field chain runs at: "
                      "0 = half the scene, 1 = the scene, 2 = the widened "
                      "bloom target the native renderer builds. Requires "
@@ -98,13 +102,12 @@ REXCVAR_DEFINE_INT32(bd_post_quality,
            static_cast<i32>(bd::gpu::PostQuality::High))
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(bd_reflection_quality,
-                     static_cast<i32>(bd::gpu::ReflectionQuality::Off),
-                     kCvarGroup,
-                     "How far a planar reflection grows past the size BD "
-                     "authored: 0 = not at all, 1 = with the render "
-                     "resolution, 2 = with supersampling too. Requires "
-                     "restart.")
+REXCVAR_DEFINE_INT32(
+    bd_reflection_quality,
+    static_cast<i32>(bd::gpu::kDefaultSettings.reflectionQuality), kCvarGroup,
+    "How far a planar reflection grows past the size BD authored: 0 = not at "
+    "all, 1 = with the render resolution, 2 = with supersampling too. "
+    "Requires restart.")
     .range(static_cast<i32>(bd::gpu::ReflectionQuality::Off),
            static_cast<i32>(bd::gpu::ReflectionQuality::High))
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
@@ -116,7 +119,7 @@ REXCVAR_DEFINE_BOOL(bd_ntsc_filter, false, kCvarGroup,
 
 // Not a preset member: how much depth-of-field a player wants is taste, and it
 // costs the same at every setting.
-REXCVAR_DEFINE_DOUBLE(bd_dof_strength, 0.0, kCvarGroup,
+REXCVAR_DEFINE_DOUBLE(bd_dof_strength, 1.0, kCvarGroup,
                       "Depth-of-field intensity, 1.0 = the game's own blur, "
                       "0 = off.")
     .range(0.0, 1.0)
@@ -125,7 +128,8 @@ REXCVAR_DEFINE_DOUBLE(bd_dof_strength, 0.0, kCvarGroup,
       return rex::cvar::ParseDouble(v, d) && std::isfinite(d);
     });
 
-REXCVAR_DEFINE_INT32(bd_shadow_dimension, 512, kCvarGroup,
+REXCVAR_DEFINE_INT32(bd_shadow_dimension,
+                     bd::gpu::kDefaultSettings.shadowDimension, kCvarGroup,
                      "Sun shadow-map resolution in pixels. Only "
                      "512/1024/2048/4096/8192, requires restart.")
     .range(512, 8192)
@@ -140,7 +144,8 @@ REXCVAR_DEFINE_INT32(bd_shadow_dimension, 512, kCvarGroup,
 // A range alone does not reject NaN: neither NaN < min nor NaN > max is ever
 // true, so it passes validation and reaches shadowPcfScale, where clamp and
 // max propagate it into the uploaded constant.
-REXCVAR_DEFINE_DOUBLE(bd_shadow_distance, 1.0, kCvarGroup,
+REXCVAR_DEFINE_DOUBLE(bd_shadow_distance,
+                      bd::gpu::kDefaultSettings.shadowDistance, kCvarGroup,
                       "Sun shadow draw-distance multiplier (1.0 = X360 "
                       "native).")
     .range(1.0, 4.0)
@@ -179,28 +184,6 @@ std::string FormatCvar(i32 v) { return std::to_string(v); }
 std::string FormatCvar(bool v) { return v ? "true" : "false"; }
 
 constexpr f64 kShadowDistanceEpsilon = 0.01;
-
-struct PresetBundle {
-  i32 superSampling;
-  i32 msaa;
-  i32 anisotropy;
-  f64 shadowDistance;
-  i32 shadowDimension;
-  i32 renderScale;
-  PostQuality postQuality;
-  ReflectionQuality reflectionQuality;
-};
-
-constexpr PresetBundle kPresets[kQualityPresetCount] = {
-    /* Low    */ {1, 0, 0, 1.0, 512, 50, PostQuality::Low,
-                  ReflectionQuality::Off},
-    /* Medium */ {1, 2, 16, 2.0, 2048, 100, PostQuality::Medium,
-                  ReflectionQuality::Low},
-    /* High   */ {2, 2, 16, 2.0, 4096, 100, PostQuality::High,
-                  ReflectionQuality::High},
-    /* Ultra  */ {2, 8, 16, 4.0, 8192, 100, PostQuality::High,
-                  ReflectionQuality::High},
-};
 
 } // namespace
 
@@ -250,38 +233,38 @@ void Settings::AdoptReflectionQuality() {
 }
 
 bool Settings::SetAnisotropy(i32 v) {
-  return rex::cvar::SetFlagByName("bd_anisotropy", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_anisotropy", FormatCvar(v));
 }
 
 bool Settings::SetNTSCFilter(bool v) {
-  return rex::cvar::SetFlagByName("bd_ntsc_filter", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_ntsc_filter", FormatCvar(v));
 }
 
 bool Settings::SetDOFStrength(f64 v) {
-  return rex::cvar::SetFlagByName("bd_dof_strength", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_dof_strength", FormatCvar(v));
 }
 
 bool Settings::SetShadowDistance(f64 v) {
-  return rex::cvar::SetFlagByName("bd_shadow_distance", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_shadow_distance", FormatCvar(v));
 }
 
 bool Settings::SetShadowQuality(f64 distance, i32 dimension) {
   const bool dist = SetShadowDistance(distance);
   const bool dim =
-      rex::cvar::SetFlagByName("bd_shadow_dimension", FormatCvar(dimension), true);
+      rex::cvar::SetFlagByName("bd_shadow_dimension", FormatCvar(dimension));
   return dist && dim;
 }
 
 bool Settings::SetVsync(bool v) {
-  return rex::cvar::SetFlagByName("bd_vsync", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_vsync", FormatCvar(v));
 }
 
 bool Settings::SetAspectRatio(i32 v) {
-  return rex::cvar::SetFlagByName("bd_aspect_ratio", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_aspect_ratio", FormatCvar(v));
 }
 
 bool Settings::SetFOVOffset(i32 v) {
-  return rex::cvar::SetFlagByName("bd_fov_offset", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_fov_offset", FormatCvar(v));
 }
 
 // Both angles halved, so the ratio of their tangents is what scales a camera's
@@ -296,23 +279,23 @@ f64 Settings::FOVTanScale() const {
 }
 
 bool Settings::SetSuperSampling(i32 v) {
-  return rex::cvar::SetFlagByName("bd_supersampling", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_supersampling", FormatCvar(v));
 }
 
 bool Settings::SetMSAA(i32 v) {
-  return rex::cvar::SetFlagByName("bd_msaa", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_msaa", FormatCvar(v));
 }
 
 bool Settings::SetRenderScale(i32 v) {
-  return rex::cvar::SetFlagByName("bd_render_scale", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_render_scale", FormatCvar(v));
 }
 
 bool Settings::SetPostQuality(i32 v) {
-  return rex::cvar::SetFlagByName("bd_post_quality", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_post_quality", FormatCvar(v));
 }
 
 bool Settings::SetReflectionQuality(i32 v) {
-  return rex::cvar::SetFlagByName("bd_reflection_quality", FormatCvar(v), true);
+  return rex::cvar::SetFlagByName("bd_reflection_quality", FormatCvar(v));
 }
 
 gpu::QualityPreset Settings::QualityPreset() const {
@@ -341,7 +324,7 @@ bool Settings::SetQualityPreset(gpu::QualityPreset preset) {
   ok = SetAnisotropy(p.anisotropy) && ok;
   ok = SetShadowDistance(p.shadowDistance) && ok;
   ok = rex::cvar::SetFlagByName("bd_shadow_dimension",
-                                FormatCvar(p.shadowDimension), true) &&
+                                FormatCvar(p.shadowDimension)) &&
        ok;
   ok = SetRenderScale(p.renderScale) && ok;
   ok = SetPostQuality(static_cast<i32>(p.postQuality)) && ok;

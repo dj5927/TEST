@@ -33,7 +33,7 @@ public:
   // and unmounting on the device change.
   void Publish();
 
-  // Once per guest tick, with Glyphs' generation. Restamps every live loaded
+  // Once per engine tick, with Glyphs' generation. Restamps every live loaded
   // instance whose art is not the current generation's.
   void Sync(u32 generation);
 

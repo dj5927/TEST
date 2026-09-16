@@ -46,7 +46,7 @@ std::atomic<bool> g_menuOwnsInput{false};
 std::atomic<bool> g_padSawInput{false};
 std::atomic<int> g_hostPointerClaims{0};
 
-// Both written and read on the guest thread: queued during a task update,
+// Both written and read on the engine thread: queued during a task update,
 // activated at the next frame's SampleButtonEdges.
 int g_pressQueued = -1;
 int g_pressActive = -1;
@@ -109,7 +109,7 @@ bool SynthesizedButton(Button btn) {
   return false;
 }
 
-// bdInputIsPressed reads the guest pad's level, and the plain arrow keys are
+// bdInputIsPressed reads the engine pad's level, and the plain arrow keys are
 // the right stick rather than the D-pad, so a held arrow never reaches it and
 // every sweep-while-held reader moves one step per press. Read live rather than
 // off a latch: this answers 'is it down now', with nothing to consume.
@@ -145,7 +145,7 @@ void UpdateMouseLook() {
 } // namespace bd::engine
 
 // r3 is the input manager, r4 the pad index, r5 the button id, and the result
-// comes back in r3. Only host-synthesized presses are added, so a guest press
+// comes back in r3. Only host-synthesized presses are added, so an engine press
 // still wins on its own. The button id is taken before the call, since r5 is a
 // volatile argument register and the original is free to leave anything in it.
 REX_HOOK_RAW(bdInputCheckButton) {

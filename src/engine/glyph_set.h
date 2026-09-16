@@ -69,7 +69,7 @@ class Glyphs {
 public:
   static Glyphs &Get();
 
-  // Once per guest tick. Follows the input device and reapplies on a change of
+  // Once per engine tick. Follows the input device and reapplies on a change of
   // device or of any keybind.
   void Tick();
 
@@ -96,6 +96,8 @@ public:
   // resolved set stamped there. What a re:Blue layout writes into its own
   // vars in place of the snapshot the parse took.
   UVRect CellUV(const char *helpName) const;
+
+  UVRect PromptUV(const PromptGlyph &glyph) const;
 
   // The ink band of one key's cap, cut clear of the cell's transparent
   // margins, for a surface that scales the cap well below the footers' 64px.
@@ -141,7 +143,7 @@ private:
   PadSet pad_ = PadSet::Xbox360;
   u32 generation_ = 0;
   LiveTextureStamp sheetStamp_;
-  // Set from whichever thread wrote the cvar, read on the guest tick.
+  // Set from whichever thread wrote the cvar, read on the engine tick.
   std::atomic<bool> bindsDirty_{false};
 };
 

@@ -30,8 +30,6 @@
 #include "gpu/settings.h"
 
 namespace {
-constexpr u32 kVisualRenderEA = 0x82DC9848;
-constexpr u32 kVisualRenderRateOff = 0x1BC4;
 constexpr u32 kScreenUVScaleReg = 50;
 constexpr u32 kSsScatterBlurEA = 0x82DF4344;
 constexpr u32 kOpaqueBlackArgb = 0xFF000000u;
@@ -75,12 +73,10 @@ namespace bd::gpu {
 // Event scenes hold BD's authored coverage, so pin it to original for the
 // duration of an .evt scene.
 f64 ShadowCoverageScale() {
-  const f64 configured = bd::engine::EventScenePlaying()
+  const f64 configured = bd::engine::IssEvent::LiveCount() > 0
                              ? 1.0
                              : Settings::Get().ShadowDistance();
 #if defined(__ANDROID__)
-  // V022 mobile shadow experiment: halve the sun frustum coverage. With the
-  // V021 low profile this turns 1.0x into 0.5x, dropping distant casters.
   return configured * 0.5;
 #else
   return configured;
@@ -91,8 +87,6 @@ u32 ShadowMapDimension() {
   const u32 configured =
       static_cast<u32>(std::max(1, Settings::Get().ShadowDimension()));
 #if defined(__ANDROID__)
-  // Match the half-distance experiment with half the linear shadow-map size.
-  // The normal V021 512 map therefore becomes 256x256 on Android only.
   return std::max(128u, configured / 2u);
 #else
   return configured;
@@ -100,8 +94,7 @@ u32 ShadowMapDimension() {
 }
 
 f32 SceneRenderScale() {
-  const u32 render = bd::mem::try_load<u32>(kVisualRenderEA);
-  const f32 rate = bd::mem::try_field<f32>(render, kVisualRenderRateOff, 1.0f);
+  const f32 rate = bd::engine::VisualRender::Get().RenderRate();
   return rate > 0.0f ? rate : 1.0f;
 }
 
@@ -114,8 +107,7 @@ void bdSceneFSAASeedHook(PPCRegister &r11) {
 bool bdSceneTilingSuppressHook() { return true; }
 
 void bdSceneRenderScaleHook(PPCRegister &r31) {
-  bd::mem::try_store<f32>(
-      r31.u32 + kVisualRenderRateOff,
+  bd::engine::VisualRender(r31.u32).SetRenderRate(
       static_cast<f32>(bd::gpu::Settings::Get().SuperSampling()));
 }
 

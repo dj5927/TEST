@@ -58,7 +58,7 @@ bool ConfigMenu::PointerHop() {
   f32 x = 0.0f;
   switch (state_) {
   case State::SECTION: {
-    D2AnimeMenu *content = ContentMenu();
+    AnimeMenu *content = ContentMenu();
     if (!content || !content->PointerRowX(row, x)) {
       hop_blocked_ = false;
       return false;
@@ -86,14 +86,14 @@ bool ConfigMenu::PointerHop() {
 }
 
 void ConfigMenu::HandleSection() {
-  if (CheckButton(Button::A)) {
+  if (CheckAction(GameAction::Confirm)) {
     const State next = SectionState(section_menu_.CursorIndex());
     if (next != State::SECTION)
       Transition(next);
     return;
   }
 
-  if (CheckButton(Button::B)) {
+  if (CheckAction(GameAction::Cancel)) {
     if (DlcChanged() || settings_restart_dirty_)
       Transition(State::CONFIRM_REBOOT);
     else
@@ -103,7 +103,7 @@ void ConfigMenu::HandleSection() {
 
 // Read-only, so B is the only input the list takes.
 void ConfigMenu::HandleAchvlist() {
-  if (CheckButton(Button::B))
+  if (CheckAction(GameAction::Cancel))
     Transition(State::SECTION);
 }
 
@@ -220,7 +220,7 @@ void ConfigMenu::HandleSettings() {
   if (SettingsSlotToRow(page, slot) < 0) {
     // A pointer parked on a title leaves the cursor there, so the way back out
     // has to be answered before the nudge returns.
-    if (CheckButton(Button::B)) {
+    if (CheckAction(GameAction::Cancel)) {
       Transition(State::SECTION);
       return;
     }
@@ -265,10 +265,10 @@ void ConfigMenu::HandleSettings() {
   // row it started on: the bands are 34px and a drag along one would otherwise
   // fall off it.
   const bool pointer = MenuMouse::Get().MouseHasCursor();
-  const bool confirmDown = CheckButton(Button::A);
+  const bool confirmDown = CheckAction(GameAction::Confirm);
   if (drag_row_ >= 0) {
     f32 x = 0.0f;
-    if (pointer && ButtonHeld(Button::A) &&
+    if (pointer && ActionHeld(GameAction::Confirm) &&
         CurrentSettingsList().RowPointerX(drag_row_, x)) {
       SetRowFromPointer(SettingsSlotToRow(page, drag_row_), x, true);
       return;
@@ -337,7 +337,7 @@ void ConfigMenu::HandleSettings() {
     return;
   }
 
-  if (CheckButton(Button::B))
+  if (CheckAction(GameAction::Cancel))
     Transition(State::SECTION);
 }
 
@@ -351,7 +351,7 @@ void ConfigMenu::HandlePadLayout() {
   else if (CheckButton(Button::Left) || CheckButton(Button::LSLeft) ||
            CheckButton(Button::LB))
     step = -1;
-  else if (CheckButton(Button::A) && MenuMouse::Get().PointerActive())
+  else if (CheckAction(GameAction::Confirm) && MenuMouse::Get().PointerActive())
     step = PadArrowUnderPointer();
 
   if (step != 0) {
@@ -372,7 +372,7 @@ void ConfigMenu::HandlePadLayout() {
     return;
   }
 
-  if (CheckButton(Button::B))
+  if (CheckAction(GameAction::Cancel))
     Transition(State::SETTINGS);
 }
 
@@ -421,7 +421,7 @@ void ConfigMenu::HandleKeybinds() {
   // Left/Right move the cursor across the 2-column grid (engine-driven).
   // A click captures into the key box it lands on, the primary from anywhere
   // else on its row. A pad press reads the cursor row instead of a pointer.
-  if (CheckButton(Button::A)) {
+  if (CheckAction(GameAction::Confirm)) {
     const int target = pointer ? (onHover ? hoverIndex : -1)
                                : (onRow ? cursor : -1);
     if (target >= 0) {
@@ -459,12 +459,12 @@ void ConfigMenu::HandleKeybinds() {
   }
 
   // settings_page_ is still Input, so return to the page that opened this.
-  if (CheckButton(Button::B))
+  if (CheckAction(GameAction::Cancel))
     Transition(State::SETTINGS);
 }
 
 void ConfigMenu::HandleModlist() {
-  if (CheckButton(Button::A)) {
+  if (CheckAction(GameAction::Confirm)) {
     Transition(State::REORDER);
     return;
   }
@@ -496,7 +496,7 @@ void ConfigMenu::HandleModlist() {
     return;
   }
 
-  if (CheckButton(Button::B))
+  if (CheckAction(GameAction::Cancel))
     Transition(State::SECTION);
 }
 
@@ -527,7 +527,7 @@ void ConfigMenu::HandleDLCList() {
     return;
   }
 
-  if (CheckButton(Button::B))
+  if (CheckAction(GameAction::Cancel))
     Transition(State::SECTION);
 }
 
@@ -547,7 +547,7 @@ void ConfigMenu::HandleKeybindCapture() {
   // the case clearing from the list behind this exists to avoid. While a
   // hit waits for its release, cancel stands down: a captured RMB or Escape is
   // also the cancel bind, and the driver's press out of it is not a cancel.
-  if (!bd::platform::KeyCapturePending() && CheckButton(Button::B)) {
+  if (!bd::platform::KeyCapturePending() && CheckAction(GameAction::Cancel)) {
     capture_index_ = -1;
     capture_alt_ = false;
     Transition(State::KEYBINDS);
@@ -565,13 +565,13 @@ void ConfigMenu::HandleReorder() {
     BD_DEBUG("[config] reorder: swapped to position {}", cursor);
   }
 
-  if (CheckButton(Button::A)) {
+  if (CheckAction(GameAction::Confirm)) {
     Transition(State::MODLIST);
     BD_DEBUG("[config] reorder confirmed at position {}", cursor);
     return;
   }
 
-  if (CheckButton(Button::B)) {
+  if (CheckAction(GameAction::Cancel)) {
     Transition(State::MODLIST);
     BD_DEBUG("[config] reorder canceled");
   }

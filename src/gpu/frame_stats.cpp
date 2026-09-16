@@ -63,9 +63,9 @@ constexpr u64 kMemorySampleInterval = 30;
 PerfSample g_mem_carry;
 
 u8 CurrentSceneState() {
-  if (bd::engine::SofdecMoviePlaying())
+  if (bd::engine::SofdecPlayer::Playing())
     return u8(PerfSceneState::Movie);
-  if (bd::engine::Field{})
+  if (bd::engine::Game::Get().ScriptManTask().Script())
     return u8(PerfSceneState::Field);
   return u8(PerfSceneState::Guest);
 }

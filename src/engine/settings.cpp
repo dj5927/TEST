@@ -8,8 +8,8 @@
 
 #include <rex/cvar.h>
 
-#include "core/global_config.h"
 #include "core/settings.h" // kCvarGroup
+#include "engine/config.h"
 #include "engine/glyph_set.h"
 
 REXCVAR_DECLARE(i32, bd_fps_limit);
@@ -138,8 +138,7 @@ void Settings::AdoptCameraSpeed() {
 }
 
 void Settings::ApplyCameraSpeed() const {
-  if (auto *cfg = GetGlobalConfig())
-    cfg->camRollSpd = static_cast<f32>(cameraSpeed_);
+  Config::Get().SetCamRollSpd(static_cast<f32>(cameraSpeed_));
 }
 
 void Settings::AdoptMouseCursorOpacity() {

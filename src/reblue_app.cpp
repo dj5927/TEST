@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -66,6 +67,16 @@ REXCVAR_DEFINE_STRING(
     "data location for config, saves, and DLC toggles. Set by the launcher.")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
+#if defined(_WIN32)
+REXCVAR_DEFINE_STRING(
+    backend, "", "reblue",
+    "Force a graphics backend for this run, 'd3d12' or 'vulkan'. Starts the "
+    "sibling executable when it names the other one and never touches the "
+    "saved choice. Empty runs the backend this executable was built for.")
+    .allowed({"d3d12", "vulkan"})
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+#endif
+
 namespace {
 
 #if defined(_WIN32)
@@ -73,20 +84,15 @@ std::filesystem::path ProgramDir() {
   return rex::filesystem::GetExecutablePath().parent_path();
 }
 
-constexpr bd::installer::Renderer kBuiltRenderer =
-#if defined(REBLUE_D3D12)
-    bd::installer::Renderer::D3D12;
-#else
-    bd::installer::Renderer::Vulkan;
-#endif
-
 // True once the sibling has taken over and this process should quit. One hop:
-// the exe it starts is the one the record names, so it hands off to nobody.
+// the exe it starts is the one that was asked for, so it hands off to nobody.
+// Only a deliberate act reaches here, an explicit --backend or the one the
+// wizard just picked, because a plain launch runs the backend it was built for.
 bool HandOffRenderer(bd::installer::Renderer wanted,
-                     const std::filesystem::path &install_root) {
-  if (wanted == kBuiltRenderer)
+                     const std::filesystem::path &directory) {
+  if (wanted == bd::installer::kBuiltRenderer)
     return false;
-  const auto sibling = install_root / bd::installer::RendererExecutable(wanted);
+  const auto sibling = directory / bd::installer::RendererExecutable(wanted);
   std::error_code ec;
   if (std::filesystem::exists(sibling, ec) &&
       bd::platform::SpawnReplacement(sibling, false))
@@ -94,6 +100,17 @@ bool HandOffRenderer(bd::installer::Renderer wanted,
   BD_WARN("[backend] {} unavailable, staying on this renderer",
           sibling.filename().string());
   return false;
+}
+
+// The backend named on the command line. The cvar's allowed list has already
+// turned anything but these two away, leaving empty for the usual case of not
+// asking for one.
+std::optional<bd::installer::Renderer> RequestedBackend() {
+  const std::string_view name = REXCVAR_GET(backend);
+  if (name.empty())
+    return std::nullopt;
+  return name == "vulkan" ? bd::installer::Renderer::Vulkan
+                          : bd::installer::Renderer::D3D12;
 }
 #endif
 
@@ -373,6 +390,7 @@ void ReblueApp::OnPostInitLogging() {
 #endif
 
   bd::engine::Achievements::Init();
+  bd::engine::Gimmicks::Get().Init();
 
   // Devmode aims dumps and captures at the game folder, which the SDK mounts
   // read-only. Runtime::SetupVfs reads this flag once, after this hook. Moving
@@ -567,8 +585,10 @@ void ReblueApp::OnCreateDialogs(rex::ui::ImGuiDrawer *drawer) {
   // Warm reboot: the guest config menu requests it, and the relaunch must run
   // on the UI thread, where the kernel state is reachable (mirrors OnClosing).
   bd::platform::SetWarmRebootHandler([this] {
-    app_context().CallInUIThreadDeferred(
-        [] { bd::platform::PerformWarmReboot(&bd::QuiesceForExit); });
+    app_context().CallInUIThreadDeferred([] {
+      bd::platform::PerformWarmReboot(&bd::QuiesceForExit,
+                                      bd::RendererRestartTarget());
+    });
   });
 }
 
@@ -685,7 +705,9 @@ void ReblueApp::OnConfigurePaths(rex::PathConfig &paths) {
   }
 #endif
 
-#if defined(_WIN32) || defined(__APPLE__)
+#if !defined(_WIN32) && !defined(__APPLE__)
+  bd::platform::ClearReplacedFiles(install_root_);
+#else
   // A build-dir exe run against this install is not part of it, so swapping
   // release binaries in under it would strand the debugger on the wrong image.
   // The mac bundle lives wherever the user dragged it, so there is no folder.
@@ -709,9 +731,12 @@ void ReblueApp::OnConfigurePaths(rex::PathConfig &paths) {
 
 #if defined(_WIN32)
   // Before any device exists: the exe that keeps the session is the one that
-  // creates one.
-  if (auto cfg = bd::installer::ReadInstallRegistry();
-      cfg && HandOffRenderer(cfg->renderer, install_root_)) {
+  // creates one. An explicit --backend is the only thing that starts the
+  // other executable, and it starts the one next to this exe: what a plain
+  // launch runs is the backend it was built for, so a build-dir exe stays the
+  // process under the debugger.
+  if (const auto wanted = RequestedBackend();
+      wanted && HandOffRenderer(*wanted, program_dir)) {
     app_context().QuitFromUIThread();
     return;
   }
