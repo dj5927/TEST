@@ -17,7 +17,9 @@
 #include "core/settings.h"
 #include "core/threading.h"
 #include "gpu/gpu.h"
+#include "platform/reboot.h"
 
+#include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
@@ -98,6 +100,13 @@ void StopGuestThreads() {
 [[noreturn]] void RunSequence(ShutdownReason reason, int exit_code) {
   BD_WARN("[shutdown] requested ({})", ReasonName(reason));
   ArmWatchdog(exit_code);
+
+  if (reason == ShutdownReason::WindowClose ||
+      reason == ShutdownReason::GuestExit) {
+    Stage("save-config", [] {
+      rex::cvar::SaveConfig(platform::ConfigFilePath());
+    });
+  }
 
   Stage("quiesce-renderer", [] { gpu::Video::BeginShutdown(); });
   Stage("perf-csv", [] { PerfCSVShutdown(); });

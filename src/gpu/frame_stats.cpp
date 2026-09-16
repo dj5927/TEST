@@ -9,10 +9,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <format>
 
 #include <rex/system/kernel_state.h>
 #include <rex/system/xmemory.h>
 
+#include "core/android_diag.h"
 #include "core/perf.h"
 #include "engine/engine.h"
 #include "gpu/device.h"
@@ -208,6 +210,67 @@ void RecordFrameSample(const PresentBreakdown &b) {
   s.vram_used = g_mem_carry.vram_used;
   s.vram_budget = g_mem_carry.vram_budget;
   s.state = CurrentSceneState();
+
+#if defined(__ANDROID__)
+  struct AndroidPerfWindow {
+    u32 frames = 0;
+    f64 dt_ms = 0.0;
+    f64 acquire_ms = 0.0;
+    f64 submit_ms = 0.0;
+    f64 present_ms = 0.0;
+    f64 fence_ms = 0.0;
+    f64 drain_ms = 0.0;
+    f64 pace_ms = 0.0;
+    f64 other_ms = 0.0;
+    f64 gpu_total_ms = 0.0;
+    f64 gpu_draw_ms = 0.0;
+    f64 gpu_resolve_ms = 0.0;
+    f64 gpu_inter_ms = 0.0;
+    u64 draws = 0;
+    u64 barrier_calls = 0;
+    u64 barriers = 0;
+    u64 fb_binds = 0;
+    u64 pso_switches = 0;
+    u64 resolves = 0;
+  };
+  static AndroidPerfWindow w;
+  ++w.frames;
+  w.dt_ms += s.dt_ms;
+  w.acquire_ms += s.acquire_ms;
+  w.submit_ms += s.submit_ms;
+  w.present_ms += s.present_ms;
+  w.fence_ms += s.fence_ms;
+  w.drain_ms += s.drain_ms;
+  w.pace_ms += s.pace_ms;
+  w.other_ms += s.other_ms;
+  w.gpu_total_ms += s.gpu_total_ms;
+  w.gpu_draw_ms += s.gpu_draw_ms;
+  w.gpu_resolve_ms += s.gpu_resolve_ms;
+  w.gpu_inter_ms += s.gpu_inter_ms;
+  w.draws += s.draws;
+  w.barrier_calls += s.barrier_calls;
+  w.barriers += s.barriers;
+  w.fb_binds += s.fb_binds;
+  w.pso_switches += s.pso_switches;
+  w.resolves += u64(s.rs_eager) + u64(s.rs_lazy) + u64(s.rs_materialize) +
+                u64(s.rs_deadelide) + u64(s.rs_seed);
+
+  if (w.frames >= 120) {
+    const f64 n = f64(w.frames);
+    const f64 avg_dt = w.dt_ms / n;
+    const f64 fps = avg_dt > 0.0 ? 1000.0 / avg_dt : 0.0;
+    bd::AndroidDiag(std::format(
+        "perf120 fps={:.2f} dt={:.2f} cpu[other={:.2f} acquire={:.2f} submit={:.2f} present={:.2f} fence={:.2f} drain={:.2f} pace={:.2f}] gpu[total={:.2f} draw={:.2f} resolve={:.2f} inter={:.2f}] avg[draws={:.1f} barrier_calls={:.1f} barriers={:.1f} fb={:.1f} pso={:.1f} resolves={:.1f}] out={}x{} state={}",
+        fps, avg_dt, w.other_ms / n, w.acquire_ms / n, w.submit_ms / n,
+        w.present_ms / n, w.fence_ms / n, w.drain_ms / n, w.pace_ms / n,
+        w.gpu_total_ms / n, w.gpu_draw_ms / n, w.gpu_resolve_ms / n,
+        w.gpu_inter_ms / n, f64(w.draws) / n, f64(w.barrier_calls) / n,
+        f64(w.barriers) / n, f64(w.fb_binds) / n, f64(w.pso_switches) / n,
+        f64(w.resolves) / n, Video::OutputWidth(), Video::OutputHeight(),
+        unsigned(s.state)));
+    w = {};
+  }
+#endif
 
   PerfPush(s);
   PerfCSVPoll();

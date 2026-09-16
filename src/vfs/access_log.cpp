@@ -15,6 +15,7 @@
 
 #include <rex/logging.h>
 
+#include "core/app_root.h"
 #include "core/logging.h"
 #include "core/time_util.h"
 #include "vfs/settings.h"
@@ -82,7 +83,7 @@ void AccessLog::Init(const std::filesystem::path &disc_root) {
 
   disc_root_ = disc_root;
 
-  log_dir_ = rex::LoggingConfig().log_dir;
+  log_dir_ = bd::AppRootFolder() / "logs";
 
   PruneOldDetailLogsLocked();
   LoadSummaryLocked();

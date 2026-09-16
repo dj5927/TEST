@@ -8,11 +8,13 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <format>
 
 #include <rex/hook.h>
 #include <rex/ppc.h>
 #include <rex/types.h>
 
+#include "core/android_diag.h"
 #include "core/memory_helpers.h"
 #include "engine/events.h"
 
@@ -184,6 +186,14 @@ void OnMoviePresent(u32 playerEA) {
   if (!player)
     return;
   const i32 status = player->status;
+#if defined(__ANDROID__)
+  static std::atomic<u32> s_android_movie_count{0};
+  const u32 n = s_android_movie_count.fetch_add(1, std::memory_order_relaxed);
+  if (n < 12) {
+    bd::AndroidDiag(std::format(
+        "sofdec_present #{} player=0x{:08X} status={}", n, playerEA, status));
+  }
+#endif
   g_movieStatus.store(status, std::memory_order_relaxed);
   const bool playing =
       status == kMovieStatusPreparing || status == kMovieStatusAdvancing;

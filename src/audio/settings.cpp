@@ -136,31 +136,31 @@ void Settings::AdoptLog() { log_ = REXCVAR_GET(bd_audio_log); }
 // and never calls a setter. False means the cvar layer rejected the value and
 // nothing changed.
 bool Settings::SetGain(f64 v) {
-  return rex::cvar::SetFlagByName("bd_audio_gain", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_audio_gain", FormatCvar(v), true);
 }
 
 bool Settings::SetCenterLevel(f64 v) {
-  return rex::cvar::SetFlagByName("bd_audio_center", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_audio_center", FormatCvar(v), true);
 }
 
 bool Settings::SetSurroundLevel(f64 v) {
-  return rex::cvar::SetFlagByName("bd_audio_surround", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_audio_surround", FormatCvar(v), true);
 }
 
 bool Settings::SetLFELevel(f64 v) {
-  return rex::cvar::SetFlagByName("bd_audio_lfe", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_audio_lfe", FormatCvar(v), true);
 }
 
 bool Settings::SetCueMonitor(i32 v) {
-  return rex::cvar::SetFlagByName("bd_audio_debug", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_audio_debug", FormatCvar(v), true);
 }
 
 bool Settings::SetPeakMeter(i32 v) {
-  return rex::cvar::SetFlagByName("bd_audio_peak", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_audio_peak", FormatCvar(v), true);
 }
 
 bool Settings::SetLog(bool v) {
-  return rex::cvar::SetFlagByName("bd_audio_log", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_audio_log", FormatCvar(v), true);
 }
 
 void Settings::AdoptCvars() {

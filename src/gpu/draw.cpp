@@ -10,11 +10,14 @@
  */
 #include "gpu/frame.h"
 
+#include <atomic>
 #include <cstddef>
+#include <format>
 #include <mutex>
 
 #include <plume_render_interface.h>
 
+#include "core/android_diag.h"
 #include "core/logging.h"
 #include "core/memory_helpers.h"
 #include "core/profiling.h"
@@ -24,6 +27,7 @@
 #include "gpu/frame_stats.h"
 #include "gpu/pipeline/pipeline_cache.h"
 #include "gpu/pipeline/pso_recorder.h"
+#include "gpu/shaders/shader_cache.h"
 
 namespace bd::gpu {
 namespace {
@@ -154,14 +158,53 @@ bool Video::FlushRenderState(u32 device_guest) {
 
 bool Video::FlushRenderStateLocked(u32 device_guest) {
   auto &s = state();
+#if defined(__ANDROID__)
+  static std::atomic<u32> s_android_flush_fail_count{0};
+  const auto android_fail = [&](std::string_view why) {
+    const u32 n = s_android_flush_fail_count.fetch_add(1, std::memory_order_relaxed);
+    if (n >= 48)
+      return;
+    const u64 vs_hash = (s.pipelineState.vertexShader &&
+                         s.pipelineState.vertexShader->shaderCacheEntry)
+                            ? s.pipelineState.vertexShader->shaderCacheEntry->hash
+                            : 0;
+    const u64 ps_hash = (s.pipelineState.pixelShader &&
+                         s.pipelineState.pixelShader->shaderCacheEntry)
+                            ? s.pipelineState.pixelShader->shaderCacheEntry->hash
+                            : 0;
+    bd::AndroidDiag(std::format(
+        "flush_fail #{} reason={} cmd_open={} fb_bound={} vs={} decl={} ps={} "
+        "vs_hash=0x{:016X} ps_hash=0x{:016X} rt_fmt={} ds_fmt={} sample={} dirty_pso={} current_pso={}",
+        n, why, s.command_list_open, s.draw_framebuffer_bound,
+        static_cast<void *>(s.pipelineState.vertexShader),
+        static_cast<void *>(s.pipelineState.vertexDeclaration),
+        static_cast<void *>(s.pipelineState.pixelShader), vs_hash, ps_hash,
+        static_cast<u32>(s.pipelineState.renderTargetFormat),
+        static_cast<u32>(s.pipelineState.depthStencilFormat),
+        static_cast<u32>(s.pipelineState.sampleCount), s.dirtyStates.pipelineState,
+        static_cast<void *>(s.current_pso)));
+  };
+#endif
   // A confirmed device-removed event is terminal: stop recording so the render
   // thread cannot race the fatal dialog into a crash.
-  if (DeviceIsLost())
+  if (DeviceIsLost()) {
+#if defined(__ANDROID__)
+    android_fail("device_lost");
+#endif
     return false;
-  if (!s.command_list_open)
+  }
+  if (!s.command_list_open) {
+#if defined(__ANDROID__)
+    android_fail("command_list_closed");
+#endif
     return false;
-  if (!s.draw_framebuffer_bound)
+  }
+  if (!s.draw_framebuffer_bound) {
+#if defined(__ANDROID__)
+    android_fail("framebuffer_not_bound");
+#endif
     return false;
+  }
   // CPU zone: a GPU zone here would add two GPU timestamps per draw.
   BD_CPU_ZONE("FlushRenderState");
 
@@ -200,6 +243,10 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
 
   // Anything missing here means the engine has not wired the pipeline up yet.
   if (!s.pipelineState.vertexShader || !s.pipelineState.vertexDeclaration) {
+#if defined(__ANDROID__)
+    android_fail(!s.pipelineState.vertexShader ? "missing_vertex_shader"
+                                               : "missing_vertex_decl");
+#endif
     u32 n;
     if (DiagShouldLog(3, s.render_target, &n)) {
       BD_DEV_WARN("[draw-diag] #{} draw dropped: vs={} decl={} ps={} rt={}x{}", n,
@@ -221,6 +268,9 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
     bool built = false;
     auto *pso = GetOrCreatePipeline(lookup, &built);
     if (!pso) {
+#if defined(__ANDROID__)
+      android_fail("pso_build_failed");
+#endif
       u32 n;
       if (DiagShouldLog(4, s.render_target, &n)) {
         BD_DEV_WARN("[draw-diag] #{} draw dropped: PSO build failed (vs={} ps={} "
@@ -243,6 +293,9 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
   } else if (!s.current_pso) {
     // Clean dirty bits but no PSO bound: the first draw after a command list
     // reset that lost the force-dirty.
+#if defined(__ANDROID__)
+    android_fail("clean_but_no_current_pso");
+#endif
     return false;
   }
 

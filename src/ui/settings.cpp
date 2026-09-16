@@ -66,15 +66,15 @@ void Settings::AdoptPerfOverlayAlpha() {
 // and never calls a setter. False means the cvar layer rejected the value and
 // nothing changed.
 bool Settings::SetCursorHideSeconds(i32 v) {
-  return rex::cvar::SetFlagByName("bd_cursor_hide_seconds", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_cursor_hide_seconds", FormatCvar(v), true);
 }
 
 bool Settings::SetPerfOverlay(i32 v) {
-  return rex::cvar::SetFlagByName("bd_perf_overlay", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_perf_overlay", FormatCvar(v), true);
 }
 
 bool Settings::SetPerfOverlayAlpha(i32 v) {
-  return rex::cvar::SetFlagByName("bd_perf_overlay_alpha", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_perf_overlay_alpha", FormatCvar(v), true);
 }
 
 void Settings::SetOverlayApplier(std::function<void(i32)> applier) {

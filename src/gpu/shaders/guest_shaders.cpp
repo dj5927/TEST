@@ -11,14 +11,19 @@
 #include "gpu/device.h"
 
 #include <algorithm>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include <plume_render_interface.h>
+#if !defined(REBLUE_D3D12)
+#include <plume_vulkan.h>
+#endif
 #include <rex/hash.h>
 #include <zstd.h>
 
+#include "core/android_diag.h"
 #include "core/logging.h"
 #include "gpu/backend.h"
 #include "gpu/host_resource_heap.h"
@@ -180,9 +185,19 @@ GuestShader *CreateShader(const be_u32 *function, ResourceType type) {
       entry->guestShader = shader;
     }
     shader->shaderCacheEntry = entry;
+#if defined(__ANDROID__)
+    bd::AndroidDiag(std::format(
+        "shader_create cache_hit hash=0x{:016X} type={} spirv_off={} spirv_size={}",
+        hash, static_cast<u32>(type), entry->spirvOffset, entry->spirvSize));
+#endif
   } else {
     BD_WARN("Shader cache miss: hash=0x{:016X} len={} type={}", hash, hash_len,
             static_cast<u32>(type));
+#if defined(__ANDROID__)
+    bd::AndroidDiag(std::format(
+        "shader_create cache_miss hash=0x{:016X} len={} type={}", hash,
+        hash_len, static_cast<u32>(type)));
+#endif
   }
   // Let boot cache replay enqueue any pending PSO that was waiting on this
   // shader's microcode hash now that its host object exists.
@@ -216,19 +231,40 @@ plume::RenderShader *GetOrLinkShader(GuestShader *gs, u32 specConstants) {
   // supplied per pipeline by the pipeline cache, and no link step exists.
   (void)specConstants;
   const u8 *cache = SpirvCache();
-  if (!cache)
+  if (!cache) {
+#if defined(__ANDROID__)
+    bd::AndroidDiag(std::format(
+        "shader_link spirv_cache_null hash=0x{:016X}", entry->hash));
+#endif
     return nullptr;
+  }
   const u8 *smol = cache + entry->spirvOffset;
   std::vector<u8> spirv(smolv::GetDecodedBufferSize(smol, entry->spirvSize));
   if (spirv.empty() ||
       !smolv::Decode(smol, entry->spirvSize, spirv.data(), spirv.size())) {
     BD_ERROR("GetOrLinkShader: SPIR-V decode failed (hash=0x{:016X})",
              entry->hash);
+#if defined(__ANDROID__)
+    bd::AndroidDiag(std::format(
+        "shader_link spirv_decode_failed hash=0x{:016X} smol={} decoded={}",
+        entry->hash, entry->spirvSize, spirv.size()));
+#endif
     return nullptr;
   }
-  return PublishShader(gs,
-                       device->createShader(spirv.data(), spirv.size(), "main",
-                                            plume::RenderShaderFormat::SPIRV));
+  auto host_shader = device->createShader(spirv.data(), spirv.size(), "main",
+                                          plume::RenderShaderFormat::SPIRV);
+#if defined(__ANDROID__)
+  const bool wrapper_ok = host_shader != nullptr;
+  const bool module_ok = wrapper_ok &&
+                         static_cast<plume::VulkanShader *>(host_shader.get())->vk !=
+                             VK_NULL_HANDLE;
+  bd::AndroidDiag(std::format(
+      "shader_link module hash=0x{:016X} wrapper={} vk_module={} decoded={}",
+      entry->hash, wrapper_ok, module_ok, spirv.size()));
+  if (!module_ok)
+    return nullptr;
+#endif
+  return PublishShader(gs, std::move(host_shader));
 #else
   const u8 *cache = DxilCache();
   if (!cache)

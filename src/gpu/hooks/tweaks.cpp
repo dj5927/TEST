@@ -75,8 +75,28 @@ namespace bd::gpu {
 // Event scenes hold BD's authored coverage, so pin it to original for the
 // duration of an .evt scene.
 f64 ShadowCoverageScale() {
-  return bd::engine::EventScenePlaying() ? 1.0
-                                         : Settings::Get().ShadowDistance();
+  const f64 configured = bd::engine::EventScenePlaying()
+                             ? 1.0
+                             : Settings::Get().ShadowDistance();
+#if defined(__ANDROID__)
+  // V022 mobile shadow experiment: halve the sun frustum coverage. With the
+  // V021 low profile this turns 1.0x into 0.5x, dropping distant casters.
+  return configured * 0.5;
+#else
+  return configured;
+#endif
+}
+
+u32 ShadowMapDimension() {
+  const u32 configured =
+      static_cast<u32>(std::max(1, Settings::Get().ShadowDimension()));
+#if defined(__ANDROID__)
+  // Match the half-distance experiment with half the linear shadow-map size.
+  // The normal V021 512 map therefore becomes 256x256 on Android only.
+  return std::max(128u, configured / 2u);
+#else
+  return configured;
+#endif
 }
 
 f32 SceneRenderScale() {
@@ -151,7 +171,7 @@ void bdReflectionTextureSeedHook(PPCRegister &r3) {
 // The light frustum is world-space and receivers sample by UV, so a larger map
 // is just finer with no shader change.
 void bdShadowResolutionScaleHook(PPCRegister &r3, PPCRegister &r4) {
-  const u32 d = static_cast<u32>(bd::gpu::Settings::Get().ShadowDimension());
+  const u32 d = bd::gpu::ShadowMapDimension();
   r3.u32 = d;
   r4.u32 = d;
 }

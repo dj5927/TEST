@@ -4,7 +4,7 @@ endif()
 # Linux picks X11 or Wayland at runtime, so plume builds its surface through the
 # SDL3 window the SDK already owns. rexglue.cmake has imported SDL3 by now, so
 # plume finds that target rather than a second copy on the system.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR ANDROID)
     set(PLUME_SDL_VULKAN_ENABLED ON CACHE BOOL "" FORCE)
 endif()
 add_subdirectory(plume EXCLUDE_FROM_ALL)

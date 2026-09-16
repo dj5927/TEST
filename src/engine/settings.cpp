@@ -25,7 +25,7 @@ REXCVAR_DECLARE(i32, bd_glyph_set);
 REXCVAR_DECLARE(bool, bd_vibration);
 REXCVAR_DECLARE(f64, bd_camera_speed);
 
-REXCVAR_DEFINE_INT32(bd_fps_limit, 0, kCvarGroup,
+REXCVAR_DEFINE_INT32(bd_fps_limit, 30, kCvarGroup,
                      "Frame-rate cap: 0 = unlimited, above 30 the fixed 30Hz "
                      "simulation is interpolated.");
 
@@ -149,47 +149,47 @@ void Settings::AdoptMouseCursorOpacity() {
 }
 
 bool Settings::SetFPSLimit(i32 v) {
-  return rex::cvar::SetFlagByName("bd_fps_limit", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_fps_limit", FormatCvar(v), true);
 }
 
 bool Settings::SetSaveAnywhere(bool v) {
-  return rex::cvar::SetFlagByName("bd_save_anywhere", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_save_anywhere", FormatCvar(v), true);
 }
 
 bool Settings::SetDisableTutorials(bool v) {
-  return rex::cvar::SetFlagByName("bd_disable_tutorials", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_disable_tutorials", FormatCvar(v), true);
 }
 
 bool Settings::SetMapGimmickMarkers(bool v) {
-  return rex::cvar::SetFlagByName("bd_map_gimmick_markers", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_map_gimmick_markers", FormatCvar(v), true);
 }
 
 bool Settings::SetHudMode(i32 v) {
-  return rex::cvar::SetFlagByName("bd_hud_mode", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_hud_mode", FormatCvar(v), true);
 }
 
 bool Settings::SetHudFadeDelay(f64 v) {
-  return rex::cvar::SetFlagByName("bd_hud_fade_delay", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_hud_fade_delay", FormatCvar(v), true);
 }
 
 bool Settings::SetGlyphSetMode(i32 v) {
-  return rex::cvar::SetFlagByName("bd_glyph_set", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_glyph_set", FormatCvar(v), true);
 }
 
 bool Settings::SetPadGlyphSet(i32 v) {
-  return rex::cvar::SetFlagByName("bd_glyph_pad", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_glyph_pad", FormatCvar(v), true);
 }
 
 bool Settings::SetMouseCursorOpacity(i32 v) {
-  return rex::cvar::SetFlagByName("bd_mouse_cursor_opacity", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_mouse_cursor_opacity", FormatCvar(v), true);
 }
 
 bool Settings::SetVibration(bool v) {
-  return rex::cvar::SetFlagByName("bd_vibration", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_vibration", FormatCvar(v), true);
 }
 
 bool Settings::SetCameraSpeed(f64 v) {
-  return rex::cvar::SetFlagByName("bd_camera_speed", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_camera_speed", FormatCvar(v), true);
 }
 
 void Settings::AdoptCvars() {

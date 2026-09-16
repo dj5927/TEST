@@ -43,9 +43,11 @@ protected:
   OnFinalizePaths(const rex::PathConfig &defaults,
                   std::function<void(rex::PathConfig)> resume) override;
   void OnConfigurePaths(rex::PathConfig &paths) override;
-  void OnConfigureLogging(rex::LogConfig &config) override;
+  void OnConfigureLogging(rex::LogConfig &config);
   void OnPreLaunchModule() override;
   void OnWindowPixelSizeChanged(u32 pixel_width, u32 pixel_height) override;
+  void OnSurfaceLost(rex::ui::UIEvent &e) override;
+  void OnSurfaceRestored(rex::ui::UIEvent &e) override;
   bool OnWindowCloseRequested() override;
   void OnShutdown() override;
 

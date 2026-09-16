@@ -7,7 +7,12 @@
  */
 #include "platform/native_window.h"
 
+#include <format>
+
 #include <SDL3/SDL_video.h>
+#if defined(__ANDROID__)
+#include <android/native_window.h>
+#endif
 #if defined(__APPLE__)
 #include <SDL3/SDL_metal.h>
 
@@ -21,6 +26,7 @@
 
 #include <rex/ui/window.h>
 
+#include "core/android_diag.h"
 #include "core/logging.h"
 #include "platform/host_resources.h"
 
@@ -141,6 +147,62 @@ bool GetNativeRenderWindow(rex::ui::Window *window, plume::RenderWindow &out) {
         "SDL window exposed no NSWindow/CAMetalLayer for the Metal surface");
     return false;
   }
+  return true;
+}
+
+#elif defined(__ANDROID__)
+
+bool GetNativeRenderWindow(rex::ui::Window *window, plume::RenderWindow &out) {
+  // Current ReXGlue Android exposes the exact SDL_Window owned by this
+  // rex::ui::Window. Do not guess via SDL_GetWindows()[0]: SDL may keep more
+  // than one window around during Android activity/surface transitions, and a
+  // swapchain created for the wrong SDL window can present successfully while
+  // the visible SurfaceView remains black.
+  if (!window) {
+    BD_ERROR("GetNativeRenderWindow called with null window");
+    return false;
+  }
+
+  auto *sdl_window =
+      static_cast<SDL_Window *>(window->GetSDLWindowHandle());
+  if (!sdl_window) {
+    BD_ERROR("ReXGlue window has no SDL_Window handle yet");
+    bd::AndroidDiag("native_window direct=null");
+    return false;
+  }
+
+  // V019 experimented with a reduced Android buffer geometry. Reset the
+  // native Surface to its default dimensions whenever a surface is acquired
+  // (including after activity resume), so an already-created BufferQueue
+  // cannot retain the reduced extent across an app update or lifecycle hop.
+  {
+    SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window);
+    auto *native_window = static_cast<ANativeWindow *>(SDL_GetPointerProperty(
+        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
+    if (native_window) {
+      const int before_w = ANativeWindow_getWidth(native_window);
+      const int before_h = ANativeWindow_getHeight(native_window);
+      const int reset_result =
+          ANativeWindow_setBuffersGeometry(native_window, 0, 0, 0);
+      bd::AndroidDiag(std::format(
+          "android_surface_reset before={}x{} result={} after={}x{}",
+          before_w, before_h, reset_result, ANativeWindow_getWidth(native_window),
+          ANativeWindow_getHeight(native_window)));
+    }
+  }
+
+  out = sdl_window;
+
+  int count = 0;
+  SDL_Window **windows = SDL_GetWindows(&count);
+  SDL_Window *first = (windows && count > 0) ? windows[0] : nullptr;
+  const SDL_WindowID id = SDL_GetWindowID(sdl_window);
+  const auto flags = static_cast<unsigned long long>(SDL_GetWindowFlags(sdl_window));
+  bd::AndroidDiag(std::format(
+      "native_window direct={} id={} flags=0x{:X} count={} first={} match_first={}",
+      static_cast<void *>(sdl_window), static_cast<unsigned>(id), flags, count,
+      static_cast<void *>(first), first == sdl_window));
+  SDL_free(windows);
   return true;
 }
 

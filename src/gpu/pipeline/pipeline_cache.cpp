@@ -11,16 +11,22 @@
  */
 #include "gpu/pipeline/pipeline_cache.h"
 
+#include <format>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 
 #include <xxhash.h>
 
+#include "core/android_diag.h"
 #include "core/profiling.h"
 #include "gpu/device.h"
 #include "gpu/occlusion.h"
 #include "gpu/shaders/shader_cache.h"
+
+#if !defined(REBLUE_D3D12)
+#include <plume_vulkan.h>
+#endif
 
 namespace bd::gpu {
 
@@ -135,31 +141,89 @@ std::unordered_map<u64, std::unique_ptr<plume::RenderPipeline>> g_pipelines;
 
 std::unique_ptr<plume::RenderPipeline> Build(const PipelineState &state) {
   auto *device = Video::HostDevice();
-  if (!device)
+  if (!device) {
+#if defined(__ANDROID__)
+    bd::AndroidDiag("pso_build stage=no_device");
+#endif
     return nullptr;
+  }
   auto *layout = Video::MainPipelineLayout();
-  if (!layout)
+  if (!layout) {
+#if defined(__ANDROID__)
+    bd::AndroidDiag("pso_build stage=no_layout");
+#endif
     return nullptr;
-  if (!state.vertexShader || !state.vertexDeclaration)
+  }
+  if (!state.vertexShader || !state.vertexDeclaration) {
+#if defined(__ANDROID__)
+    bd::AndroidDiag(std::format(
+        "pso_build stage=missing_input vs={} decl={}",
+        static_cast<void *>(state.vertexShader),
+        static_cast<void *>(state.vertexDeclaration)));
+#endif
     return nullptr;
+  }
+
+#if defined(__ANDROID__)
+  const u64 vs_hash = state.vertexShader->shaderCacheEntry
+                          ? state.vertexShader->shaderCacheEntry->hash
+                          : 0;
+  const u64 ps_hash = (state.pixelShader && state.pixelShader->shaderCacheEntry)
+                          ? state.pixelShader->shaderCacheEntry->hash
+                          : 0;
+  bd::AndroidDiag(std::format(
+      "pso_build begin vs_hash=0x{:016X} ps_hash=0x{:016X} rt_fmt={} ds_fmt={} sample={} topo={} inputs={}",
+      vs_hash, ps_hash, static_cast<u32>(state.renderTargetFormat),
+      static_cast<u32>(state.depthStencilFormat),
+      static_cast<u32>(state.sampleCount), static_cast<u32>(state.primitiveTopology),
+      state.vertexDeclaration->inputElementCount));
+#endif
 
   auto *vs = GetOrLinkShader(state.vertexShader, state.specConstants);
-  if (!vs)
+  if (!vs) {
+#if defined(__ANDROID__)
+    bd::AndroidDiag(std::format(
+        "pso_build stage=vertex_shader_failed hash=0x{:016X}", vs_hash));
+#endif
     return nullptr;
+  }
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+  if (static_cast<plume::VulkanShader *>(vs)->vk == VK_NULL_HANDLE) {
+    bd::AndroidDiag(std::format(
+        "pso_build stage=vertex_shader_module_null hash=0x{:016X}", vs_hash));
+    return nullptr;
+  }
+#endif
   // Sun occlusion count draw swaps the guest PS for the counter PS, whose
   // [earlydepthstencil] tallies depth-passing pixels into the root UAV.
   plume::RenderShader *ps = nullptr;
   if (state.occlusionCounting) {
     ps = Occlusion::CountPS();
-    if (!ps)
+    if (!ps) {
+#if defined(__ANDROID__)
+      bd::AndroidDiag("pso_build stage=occlusion_ps_failed");
+#endif
       return nullptr;
+    }
   } else {
     ps = state.pixelShader
              ? GetOrLinkShader(state.pixelShader, state.specConstants)
              : nullptr;
-    if (state.pixelShader && !ps)
+    if (state.pixelShader && !ps) {
+#if defined(__ANDROID__)
+      bd::AndroidDiag(std::format(
+          "pso_build stage=pixel_shader_failed hash=0x{:016X}", ps_hash));
+#endif
       return nullptr;
+    }
   }
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+  if (ps && static_cast<plume::VulkanShader *>(ps)->vk == VK_NULL_HANDLE) {
+    bd::AndroidDiag(std::format(
+        "pso_build stage=pixel_shader_module_null hash=0x{:016X}", ps_hash));
+    return nullptr;
+  }
+#endif
 
   plume::RenderGraphicsPipelineDesc desc;
   desc.pipelineLayout = layout;
@@ -275,7 +339,13 @@ std::unique_ptr<plume::RenderPipeline> Build(const PipelineState &state) {
     desc.specConstantsCount = 0;
   }
 
-  return CreateHostGraphicsPipeline(device, desc, "pipeline");
+  auto pipeline = CreateHostGraphicsPipeline(device, desc, "pipeline");
+#if defined(__ANDROID__)
+  bd::AndroidDiag(std::format(
+      "pso_build end result={} vs_hash=0x{:016X} ps_hash=0x{:016X}",
+      pipeline != nullptr, vs_hash, ps_hash));
+#endif
+  return pipeline;
 #endif
 }
 

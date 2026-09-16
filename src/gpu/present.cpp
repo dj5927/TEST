@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <mutex>
 #include <thread>
 
@@ -20,7 +21,9 @@
 
 #include "gpu/gpu_profiling.h"
 
+#include "core/android_diag.h"
 #include "core/logging.h"
+#include "engine/cutscene.h"
 #include "engine/engine.h"
 #include "gpu/backend.h"
 #include "gpu/constant_buffers.h"
@@ -28,6 +31,7 @@
 #include "gpu/gpu_timing.h"
 #include "gpu/output.h"
 #include "gpu/settings.h"
+#include "platform/native_window.h"
 
 namespace bd::gpu {
 
@@ -104,6 +108,55 @@ void RebuildSwapChain(VideoState &s) {
     if (s.swap_chain->getWidth() && s.swap_chain->getHeight())
       BD_ERROR("Swap chain resize failed"); // minimized 0x0 is benign
   }
+}
+
+bool RecreateSwapChainForSurface(VideoState &s) {
+  SubmitOpenListLocked(s);
+  for (u32 i = 0; i < kNumFrames; ++i) {
+    if (s.command_list_submitted[i]) {
+      s.queue->waitForCommandFence(s.fences[i].get());
+      s.command_list_submitted[i] = false;
+    }
+  }
+
+  s.framebuffers.clear();
+  s.render_semaphores.clear();
+
+  plume::RenderWindow render_window{};
+  if (!s.host_window ||
+      !bd::platform::GetNativeRenderWindow(s.host_window, render_window)) {
+    BD_ERROR("Android surface restore: native render window unavailable");
+    bd::AndroidDiag("lifecycle recreate failed native_window");
+    return false;
+  }
+
+  s.swap_chain.reset();
+  plume::RenderSwapChainDesc desc(render_window,
+                                  plume::RenderFormat::B8G8R8A8_UNORM,
+                                  kNumFrames + 1, false, kNumFrames);
+  s.swap_chain = s.queue->createSwapChain(desc);
+  if (!s.swap_chain || !s.swap_chain->resize() || s.swap_chain->isEmpty()) {
+    BD_ERROR("Android surface restore: createSwapChain failed");
+    bd::AndroidDiag("lifecycle recreate failed swapchain");
+    return false;
+  }
+
+  for (u32 i = 0; i < kNumFrames; ++i)
+    s.acquire_semaphores[i] = s.device->createCommandSemaphore();
+
+  if (!BuildFramebuffers(s) || !BuildPresentSemaphores(s)) {
+    BD_ERROR("Android surface restore: framebuffer/semaphore rebuild failed");
+    bd::AndroidDiag("lifecycle recreate failed framebuffer");
+    return false;
+  }
+
+  ApplyVsync(s);
+  s.resize_requested.store(false, std::memory_order_release);
+  bd::AndroidDiag(std::format("lifecycle recreate ok swap={}x{} images={}",
+                              s.swap_chain->getWidth(),
+                              s.swap_chain->getHeight(),
+                              s.swap_chain->getTextureCount()));
+  return true;
 }
 
 // BD renders its whole frame with RT[0] implicit, so the finished image lives
@@ -298,6 +351,94 @@ void Video::RequestResize() {
   state().resize_requested.store(true, std::memory_order_release);
 }
 
+void Video::NotifySurfaceLost() {
+  auto &s = state();
+  s.surface_available.store(false, std::memory_order_release);
+  bd::AndroidDiag("video surface_available=false");
+}
+
+void Video::NotifySurfaceRestored() {
+  auto &s = state();
+  s.surface_available.store(true, std::memory_order_release);
+  s.surface_recreate_requested.store(true, std::memory_order_release);
+  bd::AndroidDiag("video surface_available=true recreate_requested=true");
+}
+
+void Video::PresentDiagnosticColor() {
+#if defined(__ANDROID__)
+  auto &s = state();
+  std::unique_lock lock(s.mutex);
+
+  bd::AndroidDiag("native_diag=PresentDiagnosticColor enter");
+  if (!s.ready || !s.swap_chain || s.shutting_down.load(std::memory_order_acquire)) {
+    bd::AndroidDiag("native_diag=PresentDiagnosticColor unavailable");
+    return;
+  }
+  bd::AndroidDiag(std::format("native_diag=gpu backend='{}' device='{}'",
+                              s.backend_info,
+                              s.device ? s.device->getDescription().name : "<null>"));
+
+  if (s.swap_chain->needsResize())
+    RebuildSwapChain(s);
+  if (s.framebuffers.empty()) {
+    bd::AndroidDiag("native_diag=PresentDiagnosticColor no_framebuffers");
+    return;
+  }
+
+  const u32 cur = s.frame.load(std::memory_order_relaxed);
+  u32 texture_index = 0;
+  if (!s.swap_chain->acquireTexture(s.acquire_semaphores[cur].get(),
+                                    &texture_index)) {
+    bd::AndroidDiag("native_diag=PresentDiagnosticColor acquire_failed");
+    return;
+  }
+
+  BeginCommandList(s);
+  if (!s.command_list_open) {
+    bd::AndroidDiag("native_diag=PresentDiagnosticColor no_command_list");
+    return;
+  }
+
+  plume::RenderTexture *back = s.swap_chain->getTexture(texture_index);
+  plume::RenderFramebuffer *back_fb = s.framebuffers[texture_index].get();
+  s.command_list->barriers(plume::RenderBarrierStage::GRAPHICS,
+                           plume::RenderTextureBarrier(
+                               back, plume::RenderTextureLayout::COLOR_WRITE));
+  s.command_list->setFramebuffer(back_fb);
+  s.command_list->clearColor(0, plume::RenderColor(0.45f, 0.0f, 0.65f, 1.0f));
+  s.command_list->setFramebuffer(nullptr);
+  s.command_list->barriers(
+      plume::RenderBarrierStage::GRAPHICS,
+      plume::RenderTextureBarrier(back, plume::RenderTextureLayout::PRESENT));
+
+  FrameEnd(s.command_list);
+  s.command_lists[cur]->end();
+  s.command_list_open = false;
+
+  const plume::RenderCommandList *lists[] = {s.command_lists[cur].get()};
+  plume::RenderCommandSemaphore *waits[] = {s.acquire_semaphores[cur].get()};
+  plume::RenderCommandSemaphore *signals[] = {
+      s.render_semaphores[texture_index].get()};
+  s.queue->executeCommandLists(lists, 1, waits, 1, signals, 1,
+                               s.fences[cur].get());
+  s.command_list_submitted[cur] = true;
+  ApplyVsync(s);
+  const bool present_ok = s.swap_chain->present(texture_index, signals, 1);
+  s.queue->waitForCommandFence(s.fences[cur].get());
+  s.command_list_submitted[cur] = false;
+
+  u32 render_w = 0, render_h = 0;
+  Output::RenderSize(render_w, render_h);
+  bd::AndroidDiag(std::format(
+      "native_diag=early_present result={} swap={}x{} render={}x{} image={}",
+      present_ok, s.swap_chain->getWidth(), s.swap_chain->getHeight(), render_w,
+      render_h, texture_index));
+
+  lock.unlock();
+  std::this_thread::sleep_for(std::chrono::milliseconds(800));
+#endif
+}
+
 void Video::Present(GuestTexture *frontBuffer) {
   auto &s = state();
   // Before the lock: shutdown runs on the UI thread, so a Present that reached
@@ -314,6 +455,40 @@ void Video::Present(GuestTexture *frontBuffer) {
   if (s.frame_present_committed) {
     return;
   }
+
+#if defined(__ANDROID__)
+  if (!s.surface_available.load(std::memory_order_acquire)) {
+    AbandonFrame(s, lock);
+    return;
+  }
+  if (s.surface_recreate_requested.exchange(false,
+                                             std::memory_order_acq_rel)) {
+    if (!RecreateSwapChainForSurface(s)) {
+      s.surface_recreate_requested.store(true, std::memory_order_release);
+      AbandonFrame(s, lock);
+      return;
+    }
+  }
+
+  static std::atomic<u32> s_android_present_count{0};
+  const u32 android_present_n =
+      s_android_present_count.fetch_add(1, std::memory_order_relaxed);
+  const bool android_diag_log =
+      android_present_n < 12 || (android_present_n % 120) == 0;
+  if (android_diag_log) {
+    bd::AndroidDiag(std::format(
+        "present #{} enter movie={} swap={}x{} fb_count={}",
+        android_present_n, bd::engine::SofdecMoviePlaying(),
+        s.swap_chain ? s.swap_chain->getWidth() : 0,
+        s.swap_chain ? s.swap_chain->getHeight() : 0,
+        s.framebuffers.size()));
+    BD_INFO("[android-diag] Present #{} enter movie={} swap={}x{} fb_count={}",
+            android_present_n, bd::engine::SofdecMoviePlaying(),
+            s.swap_chain ? s.swap_chain->getWidth() : 0,
+            s.swap_chain ? s.swap_chain->getHeight() : 0,
+            s.framebuffers.size());
+  }
+#endif
 
   const bool resize_requested =
       s.resize_requested.exchange(false, std::memory_order_acq_rel);
@@ -353,6 +528,14 @@ void Video::Present(GuestTexture *frontBuffer) {
       }
     }
     pb.acquire_ms = ms_since(t0);
+#if defined(__ANDROID__)
+    if (android_diag_log) {
+      bd::AndroidDiag(std::format("present #{} acquire ok image={}",
+                                  android_present_n, texture_index));
+      BD_INFO("[android-diag] Present #{} acquire ok image={}",
+              android_present_n, texture_index);
+    }
+#endif
   }
 
   plume::RenderTexture *back = s.swap_chain->getTexture(texture_index);
@@ -360,6 +543,27 @@ void Video::Present(GuestTexture *frontBuffer) {
 
   GuestTexture *chosen = nullptr;
   GuestTexture *rt = SelectPresentSource(s, frontBuffer, chosen);
+#if defined(__ANDROID__)
+  if (android_diag_log) {
+    bd::AndroidDiag(std::format(
+        "present #{} source rt={} size={}x{} desc={} samples={} front={} front_size={}x{}",
+        android_present_n, static_cast<void *>(rt), rt ? rt->width : 0,
+        rt ? rt->height : 0,
+        rt ? rt->descriptorIndex : kInvalidDescriptorIndex,
+        rt ? static_cast<u32>(rt->sampleCount) : 0,
+        static_cast<void *>(frontBuffer),
+        frontBuffer ? frontBuffer->width : 0,
+        frontBuffer ? frontBuffer->height : 0));
+    BD_INFO("[android-diag] Present #{} source rt={} {}x{} desc={} samples={} front={} {}x{}",
+            android_present_n, static_cast<void *>(rt), rt ? rt->width : 0,
+            rt ? rt->height : 0,
+            rt ? rt->descriptorIndex : kInvalidDescriptorIndex,
+            rt ? static_cast<u32>(rt->sampleCount) : 0,
+            static_cast<void *>(frontBuffer),
+            frontBuffer ? frontBuffer->width : 0,
+            frontBuffer ? frontBuffer->height : 0);
+  }
+#endif
 
   // An MSAA rt must never reach the gamma blit: its descriptor is a Texture2DMS
   // view, the blit shader samples a Texture2D. A correct frame ends on a
@@ -410,7 +614,16 @@ void Video::Present(GuestTexture *frontBuffer) {
     // A removed device fails Present first, and the fence wait below still
     // returns (removal signals every fence), so without this the next D3D12
     // call is the one that reports the loss.
-    if (!s.swap_chain->present(texture_index, signals, 1)) {
+    const bool present_ok = s.swap_chain->present(texture_index, signals, 1);
+#if defined(__ANDROID__)
+    if (android_diag_log) {
+      bd::AndroidDiag(std::format("present #{} queue result={}",
+                                  android_present_n, present_ok));
+      BD_INFO("[android-diag] Present #{} queue present result={}",
+              android_present_n, present_ok);
+    }
+#endif
+    if (!present_ok) {
       if (!CheckDeviceRemoved("swapchain present"))
         s.resize_requested.store(true, std::memory_order_release);
     }

@@ -11,7 +11,9 @@
  * @license   BSD 3-Clause License
  *            See LICENSE file in the project root for full license text.
  */
+#include <atomic>
 #include <cstring>
+#include <format>
 
 #include <rex/hook.h>
 #include <rex/ppc.h>
@@ -19,6 +21,7 @@
 #include <rex/system/kernel_state.h>
 #include <rex/types.h>
 
+#include "core/android_diag.h"
 #include "core/hooks.h"
 #include "core/logging.h"
 #include "core/memory_helpers.h"
@@ -66,7 +69,19 @@ u32 D3DDevice_Swap_hook(u32 /*device*/, u32 front_buffer_va,
   auto *front_buffer =
       bd::gpu::HostResourceHeap::FromGuest<bd::gpu::GuestTexture>(
           front_buffer_va);
-  if (bd::engine::SparseFrame())
+  const bool sparse = bd::engine::SparseFrame();
+#if defined(__ANDROID__)
+  static std::atomic<u32> s_android_swap_count{0};
+  const u32 n = s_android_swap_count.fetch_add(1, std::memory_order_relaxed);
+  if (n < 12) {
+    bd::AndroidDiag(std::format(
+        "guest_swap #{} sparse={} front_va=0x{:08X} front={} size={}x{}",
+        n, sparse, front_buffer_va, static_cast<void *>(front_buffer),
+        front_buffer ? front_buffer->width : 0,
+        front_buffer ? front_buffer->height : 0));
+  }
+#endif
+  if (sparse)
     bd::gpu::Video::SkipPresent();
   else
     bd::gpu::Video::Present(front_buffer);

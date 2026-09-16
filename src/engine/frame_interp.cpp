@@ -22,6 +22,11 @@
 #include <unordered_set>
 #include <vector>
 
+#if defined(__ANDROID__)
+#include <jni.h>
+#include <SDL3/SDL_system.h>
+#endif
+
 #include <rex/hook.h>
 #include <rex/ppc.h>
 #include <rex/runtime.h>
@@ -73,6 +78,38 @@ std::mutex g_interpMutex;
 u64 g_frame = 0;
 thread_local u32 t_renderViewObj = 0;
 std::atomic<u64> g_cutTick{~0ull};
+
+#if defined(__ANDROID__)
+void SetAndroidPhoneVibration(float left, float right) {
+  const float level = std::clamp(std::max(std::abs(left), std::abs(right)),
+                                 0.0f, 1.0f);
+  const int amplitude = static_cast<int>(std::lround(level * 255.0f));
+  static int s_lastAmplitude = -1;
+  if (amplitude == s_lastAmplitude)
+    return;
+
+  auto *env = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+  auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+  if (!env || !activity)
+    return;
+
+  jclass cls = env->GetObjectClass(activity);
+  if (!cls) {
+    env->DeleteLocalRef(activity);
+    return;
+  }
+  jmethodID method = env->GetMethodID(cls, "setPhoneVibration", "(I)V");
+  if (method) {
+    env->CallVoidMethod(activity, method, static_cast<jint>(amplitude));
+    if (!env->ExceptionCheck())
+      s_lastAmplitude = amplitude;
+  }
+  if (env->ExceptionCheck())
+    env->ExceptionClear();
+  env->DeleteLocalRef(cls);
+  env->DeleteLocalRef(activity);
+}
+#endif
 
 bool CutThisTick() {
   return g_cutTick.load(std::memory_order_relaxed) == bd::engine::TickCount();
@@ -2957,12 +2994,21 @@ REX_EXTERN(__imp__PadVibrationCore__Draw);
 REX_HOOK_RAW(PadVibrationCore__Draw) {
   if (!bd::engine::TickDue())
     return;
+  f32 phoneLeft = 0.0f;
+  f32 phoneRight = 0.0f;
+  auto *amp = bd::mem::at<be_f32>(ctx.r3.u32 + 0x6C);
   if (!bd::engine::Settings::Get().Vibration()) {
-    if (auto *amp = bd::mem::at<be_f32>(ctx.r3.u32 + 0x6C)) {
+    if (amp) {
       amp[0] = 0.0f;
       amp[1] = 0.0f;
     }
+  } else if (amp) {
+    phoneLeft = static_cast<f32>(amp[0]);
+    phoneRight = static_cast<f32>(amp[1]);
   }
+#if defined(__ANDROID__)
+  SetAndroidPhoneVibration(phoneLeft, phoneRight);
+#endif
   __imp__PadVibrationCore__Draw(ctx, base);
 }
 

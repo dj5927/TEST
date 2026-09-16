@@ -70,6 +70,11 @@ public:
 
   static void Present(GuestTexture *frontBuffer = nullptr);
 
+  // Android startup proof: present one host-generated color frame before the
+  // guest renders anything, then hold it briefly so a tester can see whether
+  // the Vulkan surface/swapchain path itself reaches the display.
+  static void PresentDiagnosticColor();
+
   static void SkipPresent();
 
   // Pre-Runtime present (installer): clear back buffer + overlay hook only.
@@ -78,6 +83,12 @@ public:
   // Called from the UI thread on window pixel size events. The rebuild itself
   // stays on the render thread at the frame boundary.
   static void RequestResize();
+
+  // Android destroys the native presentation surface while the activity is in
+  // the background. Keep the guest alive, but stop presenting to the dead
+  // surface and recreate VkSurfaceKHR + VkSwapchainKHR after resume.
+  static void NotifySurfaceLost();
+  static void NotifySurfaceRestored();
 
   // The engine unbinds bound surfaces without telling us, so every mirror
   // naming the dying texture would dangle. retire_bindings=false keeps the
@@ -283,6 +294,10 @@ u32 CurrentRenderPassId();
 constexpr u32 kNumFrames = 2;
 
 struct VideoState {
+  // Non-owning. The app window outlives the renderer and is needed when an
+  // Android resume supplies a new ANativeWindow under the same SDL window.
+  rex::ui::Window *host_window = nullptr;
+
   // 'interface' is a Windows.h macro (#define interface struct).
   std::unique_ptr<plume::RenderInterface> render_iface;
   std::unique_ptr<plume::RenderDevice> device;
@@ -443,6 +458,11 @@ struct VideoState {
   // Set by Video::RequestResize from the UI thread, consumed by Present at the
   // frame boundary alongside the swap chain's own needsResize poll.
   std::atomic<bool> resize_requested{false};
+
+  // Lifecycle callbacks run on the UI thread. Vulkan teardown/recreate stays
+  // on the guest render thread while it owns mutex.
+  std::atomic<bool> surface_available{true};
+  std::atomic<bool> surface_recreate_requested{false};
 
   // Shadows the engine's guest device intent so draws have a coherent pipeline
   // state to lower.

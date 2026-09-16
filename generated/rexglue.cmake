@@ -114,17 +114,24 @@ endmacro()
 # codegen, including one a project assembles itself rather than taking the
 # library rexglue_setup_target() builds. The stamp comes first: the DEPFILE
 # names it.
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/codegen.build.stamp"
-           ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
-    COMMAND $<TARGET_FILE:rex::rexglue> codegen ${CMAKE_CURRENT_SOURCE_DIR}/reblue_manifest.toml
-    DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/codegen.d"
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Generating recompiled code for reblue"
-    VERBATIM
-)
-add_custom_target(reblue_codegen
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generated/codegen.build.stamp")
+if(ANDROID)
+    # Cross builds cannot execute the Android rexglue codegen binary on the
+    # Windows build host. The checked-in generated/ tree is already current for
+    # the US executable used by the working KR hybrid, so make this a no-op.
+    add_custom_target(reblue_codegen)
+else()
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/codegen.build.stamp"
+               ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+        COMMAND $<TARGET_FILE:rex::rexglue> codegen ${CMAKE_CURRENT_SOURCE_DIR}/reblue_manifest.toml
+        DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/codegen.d"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating recompiled code for reblue"
+        VERBATIM
+    )
+    add_custom_target(reblue_codegen
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generated/codegen.build.stamp")
+endif()
 
 # Include DLL module shared library targets if codegen has generated them
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/dll_targets.cmake")

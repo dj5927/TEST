@@ -149,6 +149,10 @@ void LogBacktrace(u64 base) {
       BD_CRITICAL("    [{:>2}] {:#018x}", i, a);
     }
   }
+#elif defined(__ANDROID__)
+  // Android bionic doesn't provide the desktop execinfo backtrace ABI.
+  // Native crashes are unwound by Android tombstones/logcat instead.
+  (void)base;
 #else
   (void)base;
   void *frames[32] = {};

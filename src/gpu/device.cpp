@@ -298,12 +298,22 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
   }
   auto &s = state();
   std::lock_guard lock(s.mutex);
+  s.host_window = window;
   if (s.ready) {
     return true;
   }
 
   if (!s.device) { // pre-Runtime path: no guest memory required
     Output::Init(window);
+#if defined(__ANDROID__)
+    {
+      u32 render_w = 0, render_h = 0;
+      const bool have_render_size = Output::RenderSize(render_w, render_h);
+      BD_INFO("[android-diag] window physical={}x{} render={}x{} valid={}",
+              window->GetActualPhysicalWidth(), window->GetActualPhysicalHeight(),
+              render_w, render_h, have_render_size);
+    }
+#endif
     plume::RenderWindow render_window{};
     if (!bd::platform::GetNativeRenderWindow(window, render_window)) {
       return false;
@@ -407,6 +417,12 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
     if (!BuildPresentSemaphores(s)) {
       return false;
     }
+#if defined(__ANDROID__)
+    BD_INFO("[android-diag] swapchain ready {}x{} images={} backend={} gpu='{}'",
+            s.swap_chain->getWidth(), s.swap_chain->getHeight(),
+            s.swap_chain->getTextureCount(), s.backend_info,
+            s.device->getDescription().name);
+#endif
     if (!BuildPipelineLayout(s)) {
       return false;
     }
@@ -473,6 +489,11 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
            static_cast<u32>(s.viewport.width),
            static_cast<u32>(s.viewport.height),
            static_cast<u32>(s.framebuffers.size()), kBindlessTextureCount);
+#if defined(__ANDROID__)
+  BD_INFO("[android-diag] host renderer ready guest_backbuffer={}x{} framebuffers={}",
+          static_cast<u32>(s.viewport.width),
+          static_cast<u32>(s.viewport.height), s.framebuffers.size());
+#endif
 
   // Background-precompile the static PSO cache. Entries whose shaders/decls do
   // not exist yet are deferred until CreateShader/CreateVertexDeclaration.

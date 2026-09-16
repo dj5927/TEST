@@ -37,7 +37,9 @@ void Output::Init(rex::ui::Window *window) {
       cfg_w > 0 && cfg_h > 0) {
     sw = std::clamp<u32>(static_cast<u32>(cfg_w), 320u, 16384u);
     sh = std::clamp<u32>(static_cast<u32>(cfg_h), 240u, 16384u);
-  } else if (!window->IsFullscreen() || !window->GetDisplayPixelSize(sw, sh)) {
+  } else {
+    // ReXGlue 0.10.0 release does not expose GetDisplayPixelSize().
+    // Use the actual drawable size; this is also the correct fallback for windowed mode.
     sw = window->GetActualPhysicalWidth();
     sh = window->GetActualPhysicalHeight();
   }

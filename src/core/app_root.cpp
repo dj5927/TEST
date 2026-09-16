@@ -32,7 +32,9 @@ std::filesystem::path g_app_root_override;
 } // namespace
 
 bool IsPackagedApplication() {
-#if !defined(_WIN32)
+#if defined(__ANDROID__)
+  return true;
+#elif !defined(_WIN32)
   if (rex::platform::env::get("APPIMAGE"))
     return true;
 #if defined(__APPLE__)
@@ -43,7 +45,11 @@ bool IsPackagedApplication() {
 }
 
 std::filesystem::path UserConfigFolder() {
-#if !defined(_WIN32)
+#if defined(__ANDROID__)
+  const auto user = rex::filesystem::GetUserFolder();
+  if (!user.empty())
+    return user / "reblue";
+#elif !defined(_WIN32)
   if (auto xdg = rex::platform::env::get("XDG_CONFIG_HOME");
       xdg && !xdg->empty())
     return std::filesystem::path(*xdg) / "reblue";
@@ -67,7 +73,11 @@ std::filesystem::path CacheRootFor(const std::filesystem::path &root) {
 std::filesystem::path AppRootFolder() {
   if (!g_app_root_override.empty())
     return g_app_root_override;
-#if !defined(_WIN32)
+#if defined(__ANDROID__)
+  const auto user = rex::filesystem::GetUserFolder();
+  if (!user.empty())
+    return user / "reblue";
+#elif !defined(_WIN32)
   // An AppImage mount is a read-only FUSE, so nothing can be written beside the
   // executable. Everything else keeps the exe dir layout.
   if (rex::platform::env::get("APPIMAGE")) {

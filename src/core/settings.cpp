@@ -167,7 +167,7 @@ void Settings::AdoptCachePath() { cachePath_ = REXCVAR_GET(bd_cache_path); }
 // setting, and its return says whether the write was accepted. It cannot
 // recurse: the callback adopts and never calls a setter.
 bool Settings::SetDevmode(bool v) {
-  return rex::cvar::SetFlagByName("bd_devmode", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_devmode", FormatCvar(v), true);
 }
 
 void Settings::SetDevmodeApplier(std::function<void()> applier) {
@@ -177,35 +177,35 @@ void Settings::SetDevmodeApplier(std::function<void()> applier) {
 }
 
 bool Settings::SetDbgPrint(bool v) {
-  return rex::cvar::SetFlagByName("bd_dbgprint", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_dbgprint", FormatCvar(v), true);
 }
 
 bool Settings::SetLanguage(const std::string &v) {
-  return rex::cvar::SetFlagByName("bd_language", v);
+  return rex::cvar::SetFlagByName("bd_language", v, true);
 }
 
 bool Settings::SetI18nKeys(bool v) {
-  return rex::cvar::SetFlagByName("bd_i18n_keys", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_i18n_keys", FormatCvar(v), true);
 }
 
 bool Settings::SetPerfHistorySeconds(i32 v) {
-  return rex::cvar::SetFlagByName("bd_perf_history_seconds", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_perf_history_seconds", FormatCvar(v), true);
 }
 
 bool Settings::SetPerfCSV(bool v) {
-  return rex::cvar::SetFlagByName("bd_perf_csv", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_perf_csv", FormatCvar(v), true);
 }
 
 bool Settings::SetShutdownTimeoutMs(i32 v) {
-  return rex::cvar::SetFlagByName("bd_shutdown_timeout_ms", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_shutdown_timeout_ms", FormatCvar(v), true);
 }
 
 bool Settings::SetUpdateCheck(bool v) {
-  return rex::cvar::SetFlagByName("bd_update_check", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_update_check", FormatCvar(v), true);
 }
 
 bool Settings::SetUpdateChannel(bd::UpdateChannel v) {
-  return rex::cvar::SetFlagByName("bd_update_channel", ToString(v));
+  return rex::cvar::SetFlagByName("bd_update_channel", ToString(v), true);
 }
 
 void Settings::AdoptCvars() {

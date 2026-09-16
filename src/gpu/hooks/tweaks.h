@@ -37,6 +37,11 @@ static_assert(offsetof(PlaneReflectInfo, lastScale) == 0x114);
 // stops matching the coverage box.
 f64 ShadowCoverageScale();
 
+// Effective sun shadow-map dimension. Android intentionally renders the map
+// at half the configured linear resolution to reduce shadow-pass cost while
+// keeping the user-visible setting/profile untouched for A/B testing.
+u32 ShadowMapDimension();
+
 f32 SceneRenderScale();
 
 } // namespace bd::gpu

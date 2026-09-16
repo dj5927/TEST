@@ -12,7 +12,12 @@ cmake_dependent_option(REBLUE_D3D12
     "Build the D3D12 renderer backend (OFF selects Vulkan)" ON "WIN32" OFF)
 cmake_dependent_option(REBLUE_VULKAN_EXE
     "Build reblue_vk.exe alongside the D3D12 one" ON "WIN32;REBLUE_D3D12" OFF)
-option(REBLUE_BUILD_INSTALLER "Build the built-in first-run disc installer" ON)
+if(ANDROID)
+    set(REBLUE_BUILD_INSTALLER_DEFAULT OFF)
+else()
+    set(REBLUE_BUILD_INSTALLER_DEFAULT ON)
+endif()
+option(REBLUE_BUILD_INSTALLER "Build the built-in first-run disc installer" ${REBLUE_BUILD_INSTALLER_DEFAULT})
 option(REBLUE_PSO_CAP "Compile in the PSO predictor-miss capture instrument" OFF)
 option(REBLUE_PROFILING "Compile in Tracy zones (never in Release)" ON)
 option(REBLUE_PCH "Precompile the hot shared headers" ON)
@@ -58,8 +63,15 @@ endif()
 add_subdirectory(thirdparty)
 
 foreach(target IN LISTS REBLUE_TARGETS)
-    add_executable(${target})
-    set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE ON)
+    if(ANDROID)
+        # SDLActivity loads the native application as libmain.so and resolves
+        # SDL_main from it. Keep the normal executable layout everywhere else.
+        add_library(${target} SHARED)
+        set_target_properties(${target} PROPERTIES OUTPUT_NAME main)
+    else()
+        add_executable(${target})
+        set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE ON)
+    endif()
 endforeach()
 
 # OBJECT and never STATIC: an archive drops the REX_HOOK symbols.
@@ -247,6 +259,10 @@ foreach(target IN LISTS REBLUE_VULKAN_TARGETS)
             "-framework IOKit"
             "-framework IOSurface"
             "-framework CoreGraphics")
+    elseif(ANDROID)
+        # The NDK provides libvulkan.so directly. Plume obtains the Android
+        # surface from SDL3 and volk resolves the device entry points.
+        target_link_libraries(${target} PRIVATE vulkan)
     else()
         # plume builds the surface through SDL3, which dlopen's the X11 or Wayland
         # client libraries itself, so nothing here links a window system.

@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <mutex>
 #include <optional>
 
@@ -23,6 +24,7 @@
 
 #include <plume_render_interface.h>
 
+#include "core/android_diag.h"
 #include "core/logging.h"
 #include "core/memory_helpers.h"
 #include "core/profiling.h"
@@ -82,6 +84,20 @@ plume::RenderPrimitiveTopology MapPrimitiveType(u32 prim) {
 
 void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
                   const DrawArgs &args = {}) {
+#if defined(__ANDROID__)
+  static std::atomic<u32> s_android_draw_count{0};
+  const u32 android_draw_n =
+      s_android_draw_count.fetch_add(1, std::memory_order_relaxed);
+  if (android_draw_n < 12) {
+    bd::AndroidDiag(std::format(
+        "guest_draw #{} name={} prim={} count={} indexed={} up={}",
+        android_draw_n, name ? name : "?", primitive_type,
+        args.vertexOrIndexCount, args.indexed, args.is_up));
+    BD_INFO("[android-diag] Draw #{} {} prim={} count={} indexed={} up={}",
+            android_draw_n, name, primitive_type, args.vertexOrIndexCount,
+            args.indexed, args.is_up);
+  }
+#endif
 #if defined(REXGLUE_ENABLE_PROFILING)
   // Per-draw pass/shader attribution, only formatted while a profiler is
   // connected (TRACY_ON_DEMAND).
@@ -112,9 +128,25 @@ void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
       MapPrimitiveType(primitive_type));
 
   if (!bd::gpu::Video::BindDrawFramebufferLocked()) {
+#if defined(__ANDROID__)
+    if (android_draw_n < 12) {
+      bd::AndroidDiag(std::format(
+          "guest_draw #{} stopped BindDrawFramebuffer failed", android_draw_n));
+      BD_ERROR("[android-diag] Draw #{} stopped: BindDrawFramebuffer failed",
+               android_draw_n);
+    }
+#endif
     return;
   }
   if (!bd::gpu::Video::FlushRenderStateLocked(device_guest)) {
+#if defined(__ANDROID__)
+    if (android_draw_n < 12) {
+      bd::AndroidDiag(std::format(
+          "guest_draw #{} stopped FlushRenderState failed", android_draw_n));
+      BD_ERROR("[android-diag] Draw #{} stopped: FlushRenderState failed",
+               android_draw_n);
+    }
+#endif
     return; // FlushRenderState logs its own reason
   }
 
@@ -157,6 +189,12 @@ void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
   } else {
     cmd_list->drawInstanced(args.vertexOrIndexCount, 1, args.startVertex, 0);
   }
+#if defined(__ANDROID__)
+  if (android_draw_n < 12) {
+    bd::AndroidDiag(std::format("guest_draw #{} submitted", android_draw_n));
+    BD_INFO("[android-diag] Draw #{} submitted", android_draw_n);
+  }
+#endif
 }
 
 // bdBuildQuadVertices assembles every glyph into this one buffer, and unlike

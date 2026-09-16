@@ -45,6 +45,14 @@ const SettingsPageTable &Table(SettingsPage page) { return SettingsRowTable(page
 
 bool s_disableRestart = false;
 
+bool PersistSettingChange(bool changed) {
+#if defined(__ANDROID__)
+  if (changed)
+    rex::cvar::SaveConfig(platform::ConfigFilePath());
+#endif
+  return changed;
+}
+
 bool Shown(const SettingRow &s) { return !s.hidden || !s.hidden(); }
 
 // An index is a position among the rows this disc has, so a locale-dropped row
@@ -450,32 +458,32 @@ bool WriteSlider(const SettingRow &s, double value) {
   char buf[32];
   std::snprintf(buf, sizeof(buf), s.sfmt, value);
   if (s.binding.set)
-    return s.binding.set(std::strtod(buf, nullptr));
-  if (!rex::cvar::SetFlagByName(s.binding.cvar, buf)) {
+    return PersistSettingChange(s.binding.set(std::strtod(buf, nullptr)));
+  if (!rex::cvar::SetFlagByName(s.binding.cvar, buf, true)) {
     BD_WARN("[config] failed to set {} = {}", s.binding.cvar, buf);
     return false;
   }
   BD_DEBUG("[config] {} = {}", s.binding.cvar, buf);
-  return true;
+  return PersistSettingChange(true);
 }
 
 // Discrete rows: a reblue row hands the option's number to the module that
 // owns the value, an SDK row writes the option's text by name.
 bool WriteValue(const SettingRow &s, const SettingOption &o) {
   if (s.binding.setPair)
-    return s.binding.setPair(o.num, o.num2);
+    return PersistSettingChange(s.binding.setPair(o.num, o.num2));
   if (s.binding.setText)
-    return s.binding.setText(o.value);
+    return PersistSettingChange(s.binding.setText(o.value));
   if (s.binding.set)
-    return s.binding.set(o.num);
-  if (!rex::cvar::SetFlagByName(s.binding.cvar, o.value)) {
+    return PersistSettingChange(s.binding.set(o.num));
+  if (!rex::cvar::SetFlagByName(s.binding.cvar, o.value, true)) {
     BD_WARN("[config] failed to set {} = {}", s.binding.cvar, o.value);
     return false;
   }
   if (s.binding.cvar2 && o.value2)
-    rex::cvar::SetFlagByName(s.binding.cvar2, o.value2);
+    rex::cvar::SetFlagByName(s.binding.cvar2, o.value2, true);
   BD_DEBUG("[config] {} = {}", s.binding.cvar, OptionLabel(o));
-  return true;
+  return PersistSettingChange(true);
 }
 
 int NextEnabledOption(const SettingRow &s, int cur, int dir) {
@@ -835,7 +843,7 @@ bool SetKeybind(SettingsPage page, int index, const std::string &keyName,
     return false;
   std::string value = SetBindToken(rex::cvar::GetFlagByName(s.binding.cvar),
                                    alt ? 1 : 0, keyName);
-  if (!rex::cvar::SetFlagByName(s.binding.cvar, value)) {
+  if (!rex::cvar::SetFlagByName(s.binding.cvar, value, true)) {
     BD_WARN("[config] failed to bind {} = {}", s.binding.cvar, value);
     return false;
   }
@@ -849,7 +857,7 @@ bool ClearKeybind(SettingsPage page, int index) {
   const SettingRow &s = At(page, index);
   if (s.kind != SettingKind::Keybind)
     return false;
-  if (!rex::cvar::SetFlagByName(s.binding.cvar, "")) {
+  if (!rex::cvar::SetFlagByName(s.binding.cvar, "", true)) {
     BD_WARN("[config] failed to clear {}", s.binding.cvar);
     return false;
   }
@@ -873,7 +881,7 @@ bool ResetKeybinds(SettingsPage page) {
     const std::string def = entry->default_value;
     if (rex::cvar::GetFlagByName(s.binding.cvar) == def)
       continue;
-    if (!rex::cvar::SetFlagByName(s.binding.cvar, def)) {
+    if (!rex::cvar::SetFlagByName(s.binding.cvar, def, true)) {
       BD_WARN("[config] failed to reset {}", s.binding.cvar);
       continue;
     }

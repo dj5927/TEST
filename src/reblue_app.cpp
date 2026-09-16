@@ -7,6 +7,7 @@
  */
 #include "reblue_app.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -21,6 +22,7 @@
 #include <rex/filesystem.h>
 #include <rex/input/device_assignment.h>
 #include <rex/input/input_system.h>
+#include <rex/input/touch/touch_input_driver.h>
 #include <rex/perf/counter.h>
 #include <rex/ui/keybinds.h>
 #include <rex/ui/window.h>
@@ -30,6 +32,7 @@
 #include <rex/system/kernel_state.h>
 
 #include "audio/audio.h"
+#include "core/android_diag.h"
 #include "core/app_root.h"
 #include "core/build_info.h"
 #include "core/logging.h"
@@ -198,6 +201,19 @@ bool SetCvarDefault(std::string_view name, const std::string &value) {
 // Called from the ReblueApp constructor, after every cvar has registered and
 // before ReXApp::OnInitialize loads the config.
 void ApplyReblueCvarDefaults() {
+#if defined(__ANDROID__)
+  constexpr std::pair<const char *, const char *> kAndroidDefaults[] = {
+      {"bd_opt_audio_hints", "0"},
+      {"bd_opt_msg_speed", "3"},
+      {"bd_opt_msg_size", "1"},
+      {"bd_update_check", "false"},
+      {"bd_fps_limit", "0"},
+  };
+  for (const auto &[name, value] : kAndroidDefaults)
+    if (!SetCvarDefault(name, value))
+      BD_WARN("{} not registered, Android default not applied", name);
+#endif
+
   // The SDK registers mnk_mode off, but re:Blue wants the keyboard live out of
   // the box. This also overrides a command-line --no-mnk_mode, which leaves the
   // value equal to the SDK default and so reads as untouched.
@@ -252,11 +268,13 @@ void ApplyReblueCvarDefaults() {
   // keeps it out of the config: SerializeToTOML quotes a string flag without
   // escaping it, so a Windows path's backslashes read as TOML escapes and the
   // next load throws the whole file away.
+#if !defined(__ANDROID__)
   if (!SetCvarDefault(
           "hid_mappings_file",
           (rex::filesystem::GetExecutableFolder() / "gamecontrollerdb.txt")
               .generic_string()))
     BD_WARN("hid_mappings_file not registered, controller database not staged");
+#endif
 }
 
 } // namespace
@@ -276,6 +294,61 @@ ReblueApp::~ReblueApp() = default;
 // Runs as soon as the SDK opens the log file, so which build produced the lines
 // below it is always the first thing in the log.
 void ReblueApp::OnPostInitLogging() {
+#if defined(__ANDROID__)
+  // Match the known-good Korean PC profile on first V024 boot. This is a
+  // one-time migration only; after the marker exists, user language/voice
+  // changes are left alone.
+  {
+    const std::filesystem::path cfg = bd::platform::ConfigFilePath();
+    const std::filesystem::path marker =
+        cfg.parent_path() / ".android_kr_defaults_v024";
+    std::error_code ec;
+    if (!std::filesystem::exists(marker, ec)) {
+      bool ok = true;
+      ok = rex::cvar::SetFlagByName("user_language", "7", true) && ok;
+      ok = rex::cvar::SetFlagByName("bd_language", "kr", true) && ok;
+      ok = rex::cvar::SetFlagByName("bd_opt_voice_type", "2", true) && ok;
+      if (ok) {
+        rex::cvar::SaveConfig(cfg);
+        std::ofstream out(marker, std::ios::trunc);
+        if (out)
+          out << "24\n";
+        bd::AndroidDiag(
+            "v024 Korean defaults migrated: user_language=7 bd_language=kr "
+            "bd_opt_voice_type=2");
+      } else {
+        BD_WARN("Android Korean-default migration could not set all cvars");
+      }
+    }
+  }
+
+  {
+    const std::filesystem::path cfg = bd::platform::ConfigFilePath();
+    const std::filesystem::path marker =
+        cfg.parent_path() / ".android_gameplay_defaults_v025";
+    std::error_code ec;
+    if (!std::filesystem::exists(marker, ec)) {
+      bool ok = true;
+      ok = rex::cvar::SetFlagByName("bd_opt_audio_hints", "0", true) && ok;
+      ok = rex::cvar::SetFlagByName("bd_opt_msg_speed", "3", true) && ok;
+      ok = rex::cvar::SetFlagByName("bd_opt_msg_size", "1", true) && ok;
+      ok = rex::cvar::SetFlagByName("bd_update_check", "false", true) && ok;
+      ok = rex::cvar::SetFlagByName("bd_fps_limit", "0", true) && ok;
+      if (ok) {
+        rex::cvar::SaveConfig(cfg);
+        std::ofstream out(marker, std::ios::trunc);
+        if (out)
+          out << "25\n";
+        bd::AndroidDiag(
+            "v025 gameplay defaults migrated: audio_hints=0 msg_speed=3 "
+            "msg_size=1 update_check=false fps_limit=0");
+      } else {
+        BD_WARN("Android V025 gameplay-default migration failed");
+      }
+    }
+  }
+#endif
+
   bd::SettingsMigration::Apply();
   // Every Settings object adopts the config file and the command line here.
   // OnPostInitLogging is the first consumer hook after rex::cvar::LoadConfig,
@@ -287,6 +360,17 @@ void ReblueApp::OnPostInitLogging() {
   bd::ui::Settings::Get().Init();
   bd::engine::Settings::Get().Init();
   bd::engine::GameOptions::Get().Init();
+
+#if defined(__ANDROID__)
+  bd::AndroidDiag(fmt::format(
+      "config path={} msaa={} render_scale={} shadow={} post={} reflection={} fps_limit={}",
+      bd::platform::ConfigFilePath().string(), bd::gpu::Settings::Get().MSAA(),
+      bd::gpu::Settings::Get().RenderScale(),
+      bd::gpu::Settings::Get().ShadowDimension(),
+      static_cast<i32>(bd::gpu::Settings::Get().PostQuality()),
+      static_cast<i32>(bd::gpu::Settings::Get().ReflectionQuality()),
+      bd::engine::Settings::Get().FPSLimit()));
+#endif
 
   bd::engine::Achievements::Init();
 
@@ -329,12 +413,86 @@ void ReblueApp::OnPreSetup(rex::RuntimeConfig &config) {
         std::to_string(bd::audio::Settings::Get().QueueFrames()));
   }
 
+#if defined(__ANDROID__)
+  // Android should be playable without a physical controller. ReXGlue ships
+  // a touch->XInput driver, but it exposes no device until the host installs
+  // a layout provider. Force the mobile controls on for this package.
+  rex::cvar::SetFlagByName("touch_controls", "true");
+  rex::cvar::SetFlagByName("touch_opacity", "0.58");
+#endif
+
   // Blue Dragon is single player and polls guest user 0. The SDK default
   // binds one pad per guest user, so a second controller would be inert.
   config.input_factory =
       [](bool tool_mode) -> std::unique_ptr<rex::system::IInputSystem> {
     auto input = rex::input::CreateDefaultInputSystem(tool_mode);
     if (input) {
+#if defined(__ANDROID__)
+      if (auto *touch =
+              input->GetDriver<rex::input::touch::TouchInputDriver>()) {
+        touch->SetLayoutProvider([](float width, float height) {
+          using namespace rex::input;
+          using namespace rex::input::touch;
+
+          TouchLayout layout;
+          if (width <= 0.0f || height <= 0.0f)
+            return layout;
+
+          const float unit = std::min(width, height);
+          const float face_r = unit * 0.052f;
+          const float face_gap = unit * 0.105f;
+          const float stick_r = unit * 0.120f;
+          const float right_stick_r = unit * 0.095f;
+          const float dpad_r = unit * 0.095f;
+          const float pill_half_w = unit * 0.075f;
+          const float pill_half_h = unit * 0.030f;
+          const float mini_half_w = unit * 0.055f;
+          const float mini_half_h = unit * 0.025f;
+
+          layout.sticks.push_back(MakeFixedStick(
+              width * 0.135f, height * 0.735f, stick_r, TouchAxis::kLeft));
+          layout.sticks.push_back(MakeFixedStick(
+              width * 0.700f, height * 0.805f, right_stick_r,
+              TouchAxis::kRight));
+
+          layout.controls.push_back(
+              MakeDpad(width * 0.295f, height * 0.790f, dpad_r));
+
+          const float fx = width * 0.875f;
+          const float fy = height * 0.690f;
+          layout.controls.push_back(MakeCircle(
+              fx, fy + face_gap, face_r, "A", X_INPUT_GAMEPAD_A));
+          layout.controls.push_back(MakeCircle(
+              fx + face_gap, fy, face_r, "B", X_INPUT_GAMEPAD_B));
+          layout.controls.push_back(MakeCircle(
+              fx - face_gap, fy, face_r, "X", X_INPUT_GAMEPAD_X));
+          layout.controls.push_back(MakeCircle(
+              fx, fy - face_gap, face_r, "Y", X_INPUT_GAMEPAD_Y));
+
+          layout.controls.push_back(MakePill(
+              width * 0.145f, height * 0.105f, pill_half_w, pill_half_h,
+              "LB", X_INPUT_GAMEPAD_LEFT_SHOULDER));
+          layout.controls.push_back(MakePill(
+              width * 0.300f, height * 0.105f, pill_half_w, pill_half_h,
+              "LT", 0, TouchTrigger::kLeft));
+          layout.controls.push_back(MakePill(
+              width * 0.700f, height * 0.105f, pill_half_w, pill_half_h,
+              "RT", 0, TouchTrigger::kRight));
+          layout.controls.push_back(MakePill(
+              width * 0.855f, height * 0.105f, pill_half_w, pill_half_h,
+              "RB", X_INPUT_GAMEPAD_RIGHT_SHOULDER));
+
+          layout.controls.push_back(MakePill(
+              width * 0.455f, height * 0.875f, mini_half_w, mini_half_h,
+              "BACK", X_INPUT_GAMEPAD_BACK));
+          layout.controls.push_back(MakePill(
+              width * 0.545f, height * 0.875f, mini_half_w, mini_half_h,
+              "START", X_INPUT_GAMEPAD_START));
+
+          return layout;
+        });
+      }
+#endif
       input->SetDeviceAssignment(
           std::make_unique<rex::input::SharedAssignment>());
     }
@@ -421,6 +579,56 @@ std::unique_ptr<rex::ui::ImmediateDrawer> ReblueApp::OnCreateImmediateDrawer() {
 }
 
 void ReblueApp::OnConfigurePaths(rex::PathConfig &paths) {
+#if defined(__ANDROID__)
+  // Android ships as an SDLActivity + libmain.so rather than a desktop
+  // installation. Keep writable state in the app-specific user folder, while
+  // the Java launcher points REBLUE_GAME_DATA_ROOT at a manually populated
+  // external-media game directory that is easy to reach from a file manager.
+  active_profile_ = SanitizeProfileName(std::string(REXCVAR_GET(profile)));
+  REXCVAR_SET(profile, "default");
+
+  install_root_ = bd::AppRootFolder();
+  bd::SetAppRoot(install_root_);
+  profile_root_ = install_root_ / "profiles" / active_profile_;
+  std::error_code android_ec;
+  std::filesystem::create_directories(profile_root_, android_ec);
+  std::filesystem::create_directories(install_root_ / "cache", android_ec);
+
+  std::filesystem::path game_data_root;
+  if (const char *android_game_root = std::getenv("REBLUE_GAME_DATA_ROOT");
+      android_game_root && *android_game_root) {
+    game_data_root = std::filesystem::path(android_game_root);
+  } else {
+    // Compatibility fallback for V001/V002 installs that staged game data in
+    // the app-specific external files directory.
+    game_data_root = install_root_ / "game";
+  }
+  paths.game_data_root = game_data_root;
+
+  std::filesystem::path config_path = profile_root_ / "reblue.toml";
+  if (const char *android_config_path = std::getenv("REBLUE_CONFIG_PATH");
+      android_config_path && *android_config_path) {
+    config_path = std::filesystem::path(android_config_path);
+  } else if (!game_data_root.empty() && game_data_root.has_parent_path()) {
+    config_path = game_data_root.parent_path() / "reblue.toml";
+  }
+
+  static bool android_external_config_loaded = false;
+  if (!android_external_config_loaded) {
+    android_external_config_loaded = true;
+    android_ec.clear();
+    if (std::filesystem::exists(config_path, android_ec) && !android_ec)
+      rex::cvar::LoadConfig(config_path);
+    REXCVAR_SET(profile, "default");
+    bd::AndroidDiag(fmt::format("external config path={}", config_path.string()));
+  }
+  paths.user_data_root = profile_root_;
+  paths.cache_root = install_root_ / "cache";
+  paths.config_path = config_path;
+  bd::platform::SetProfileContext(active_profile_, config_path);
+  return;
+#else
+
   // Earliest hook reblue gets. Log and config setup below here can throw.
   bd::platform::InstallTerminateHandler();
 
@@ -508,6 +716,7 @@ void ReblueApp::OnConfigurePaths(rex::PathConfig &paths) {
     return;
   }
 #endif
+#endif  // __ANDROID__
 }
 
 void ReblueApp::OnConfigureLogging(rex::LogConfig &config) {
@@ -515,9 +724,20 @@ void ReblueApp::OnConfigureLogging(rex::LogConfig &config) {
     if (rex::cvar::GetFlagSource(name) == rex::cvar::Source::kConfig)
       rex::cvar::ResetToDefault(name);
   }
-  config.log_dir = bd::AppRootFolder() / "logs";
-  config.dir_budget_bytes = kLogDirBudget;
-  config.flush_interval = std::chrono::seconds(1);
+#if defined(__ANDROID__)
+  if (const char *android_game_root = std::getenv("REBLUE_GAME_DATA_ROOT");
+      android_game_root && *android_game_root) {
+    const auto external_log_dir =
+        std::filesystem::path(android_game_root).parent_path() / "android_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(external_log_dir, ec);
+    if (!ec) {
+      config.log_dir = external_log_dir.string();
+      return;
+    }
+  }
+#endif
+  config.log_dir = (bd::AppRootFolder() / "logs").string();
 }
 
 rex::PathConfig
@@ -593,6 +813,22 @@ void ReblueApp::FinishUpgrade(bool accepted, bd::installer::InstallConfig cfg,
 std::optional<rex::PathConfig>
 ReblueApp::OnFinalizePaths(const rex::PathConfig &defaults,
                            std::function<void(rex::PathConfig)> resume) {
+#if defined(__ANDROID__)
+  (void)resume;
+  rex::PathConfig paths = defaults;
+  if (!std::filesystem::exists(paths.game_data_root / "default.xex")) {
+    bd::platform::ShowFatalError(
+        "Blue Dragon KR - game data missing",
+        "Copy the prepared Blue Dragon KR game folder to:\n" +
+            paths.game_data_root.string() +
+            "\n\nThe folder must contain default.xex.");
+    app_context().QuitFromUIThread();
+    return std::nullopt;
+  }
+  paths.cache_root = ResolveCacheRoot();
+  return std::optional<rex::PathConfig>(paths);
+#else
+
   // The SDK has already folded --game_data_root / positional game_directory
   // into defaults.game_data_root.
   const bool user_supplied_path = GetArgument("game_directory").has_value() ||
@@ -700,6 +936,7 @@ ReblueApp::OnFinalizePaths(const rex::PathConfig &defaults,
   app_context().QuitFromUIThread();
   return std::nullopt;
 #endif
+#endif  // __ANDROID__
 }
 
 bool ReblueApp::BeginPreGuestUI() {
@@ -907,6 +1144,23 @@ void ReblueApp::OnPreLaunchModule() {
 
   bd::vfs::VFS::Get().Init(rt->game_data_root(), rt->cache_root());
   bd::vfs::VFS::Get().SetProfile(profile_root);
+#if defined(__ANDROID__)
+  // The Android package uses the US executable with the Korean/Asian text
+  // overlay staged next to game/ as mods/bd_asia_text. A fresh Android
+  // profile has no mod_order.txt, so explicitly enable the required overlay
+  // when it is present instead of making the user manage a hidden profile
+  // file under Android/data.
+  const auto asia_text_mod =
+      rt->game_data_root().parent_path() / "mods" / "bd_asia_text";
+  if (std::filesystem::is_directory(asia_text_mod)) {
+    bd::vfs::VFS::Get().Mods().Enable("bd_asia_text");
+    BD_INFO("[android] enabled required KR text mod at {}",
+            asia_text_mod.string());
+  } else {
+    BD_WARN("[android] required KR text mod missing at {}",
+            asia_text_mod.string());
+  }
+#endif
 
   // Arms the channel watch only. The check itself runs at the title, ahead of
   // the guest's own downloadable-content load.
@@ -1023,6 +1277,22 @@ void ReblueApp::OnWindowPixelSizeChanged(u32 pixel_width, u32 pixel_height) {
   (void)pixel_width;
   (void)pixel_height;
   bd::gpu::Video::RequestResize();
+}
+
+void ReblueApp::OnSurfaceLost(rex::ui::UIEvent &e) {
+  (void)e;
+#if defined(__ANDROID__)
+  bd::AndroidDiag("lifecycle surface_lost");
+#endif
+  bd::gpu::Video::NotifySurfaceLost();
+}
+
+void ReblueApp::OnSurfaceRestored(rex::ui::UIEvent &e) {
+  (void)e;
+#if defined(__ANDROID__)
+  bd::AndroidDiag("lifecycle surface_restored");
+#endif
+  bd::gpu::Video::NotifySurfaceRestored();
 }
 
 void ReblueApp::SetPerfOverlayStage(bd::ui::OverlayStage stage,

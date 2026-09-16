@@ -12,6 +12,26 @@ function(reblue_shader_cache)
     cmake_path(GET ARG_OUTPUT_CPP PARENT_PATH output_dir)
     file(MAKE_DIRECTORY "${output_dir}")
 
+    if(ANDROID)
+        # XenosRecomp is a host-side generator. In an Android cross build its
+        # target would be an Android executable and therefore cannot run on the
+        # Windows build host. Reuse the architecture-independent cache emitted
+        # by the known-good desktop build instead.
+        set(prebuilt "${CMAKE_CURRENT_SOURCE_DIR}/android_prebuilt/shader_cache.cpp")
+        if(NOT EXISTS "${prebuilt}")
+            message(FATAL_ERROR "Android prebuilt shader_cache.cpp is missing")
+        endif()
+        add_custom_command(
+            OUTPUT "${ARG_OUTPUT_CPP}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${prebuilt}" "${ARG_OUTPUT_CPP}"
+            DEPENDS "${prebuilt}"
+            COMMENT "Using prebuilt Xenos shader cache for Android"
+            VERBATIM)
+        add_custom_target(reblue_shader_cache_gen DEPENDS "${ARG_OUTPUT_CPP}")
+        add_custom_target(reblue_shader_hlsl_dump)
+        return()
+    endif()
+
     file(GLOB_RECURSE shader_inputs CONFIGURE_DEPENDS
         "${ARG_INPUT_DIR}/*.vso" "${ARG_INPUT_DIR}/*.pso" "${ARG_INPUT_DIR}/*.xex")
 

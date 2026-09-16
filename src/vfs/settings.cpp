@@ -45,7 +45,7 @@ void Settings::AdoptModLogMaxMB() {
 }
 
 bool Settings::SetModLog(bool v) {
-  return rex::cvar::SetFlagByName("bd_mod_log", FormatCvar(v));
+  return rex::cvar::SetFlagByName("bd_mod_log", FormatCvar(v), true);
 }
 
 void Settings::AdoptCvars() {

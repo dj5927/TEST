@@ -18,8 +18,10 @@
 #include "engine/menus/config_menu_data.h"
 #include "engine/menus/update_prompt.h"
 #include "engine/settings.h"
+#include "engine/language.h"
 #include "engine/sfx.h"
 #include "engine/state_layout.h"
+#include "engine/virtual_buttons.h"
 #include "gpu/gpu.h"
 #include "ui/ui.h"
 
@@ -28,6 +30,7 @@
 #include <map>
 #include <string>
 
+#include <rex/cvar.h>
 #include <rex/hook.h>
 #include <rex/memory/utils.h>
 #include <rex/ppc.h>
@@ -39,6 +42,8 @@ using bd::engine::Button;
 using bd::engine::CheckButton;
 using rex::memory::store_and_swap;
 
+REXCVAR_DECLARE(i32, bd_opt_voice_type);
+
 REX_IMPORT(__imp__bdColor4fToARGB, Color4fToARGB, u32(u32));
 REX_IMPORT(__imp__bdTextCalcWidth, TextCalcWidth, f64(f64, u32, u32, u32, u32));
 REX_IMPORT(__imp__SequenceHolder_FindSequenceByName, FindSequenceByName,
@@ -47,6 +52,7 @@ REX_EXTERN(__imp__Visual__method_7E60);
 REX_EXTERN(__imp__TitleTask_Update);
 REX_EXTERN(__imp__TitleTask_Draw);
 REX_EXTERN(__imp__TitleTask_OnChildComplete);
+REX_EXTERN(__imp__TitleTask_PollInputStart);
 
 namespace {
 
@@ -77,6 +83,8 @@ struct TitleTask_t {
   /* 0x0A4 */ char child_name[6]; // task-name string, "Title\0" restored here
   /* 0x0AA */ u8 _pad0AA[0x104 - 0xAA];
   /* 0x104 */ be_u32 is_xbox_live;
+  /* 0x108 */ u8 _pad108[0x114 - 0x108];
+  /* 0x114 */ be_u32 language_cursor;
 };
 static_assert(offsetof(TitleTask_t, next_seq_id) == 0x078);
 static_assert(offsetof(TitleTask_t, state) == 0x090);
@@ -85,6 +93,7 @@ static_assert(offsetof(TitleTask_t, has_save_data) == 0x098);
 static_assert(offsetof(TitleTask_t, child_task) == 0x0A0);
 static_assert(offsetof(TitleTask_t, child_name) == 0x0A4);
 static_assert(offsetof(TitleTask_t, is_xbox_live) == 0x104);
+static_assert(offsetof(TitleTask_t, language_cursor) == 0x114);
 
 TitleTask_t *Task(u32 titleTask) { return bd::mem::at<TitleTask_t>(titleTask); }
 
@@ -116,6 +125,8 @@ constexpr f32 kInstant = 0.05f;
 constexpr u32 kSequenceNotRegistered = 0;
 u32 s_debug_seq_id = kSequenceNotRegistered;
 bool s_debug_resolved = false;
+
+bool s_voice_picker_active = false;
 
 // Drawn every frame, so the lookup and its UTF-16 conversion are cached.
 const std::u16string &RowLabel(const char *key) {
@@ -402,6 +413,45 @@ REX_HOOK_RAW(TitleTask_Update) {
   u32 titleTask = ctx.r3.u32;
   auto *task = Task(titleTask);
   static float s_exit_hold_timer = 0.0f;
+
+  // The stock New Game voice picker (state 7) polls its own D-pad helpers,
+  // bypassing re:Blue's menu-arrow synthesis. Seed it from the persisted
+  // profile voice type, then add only synthesized keyboard Up/Down here. The
+  // guest still handles controller input and confirm/cancel normally.
+  if (task->state == 7) {
+    const int count = std::max(0, bd::engine::Language().VoiceCount());
+    if (!s_voice_picker_active) {
+      s_voice_picker_active = true;
+      if (count > 0) {
+        const int voiceType =
+            std::clamp<int>(REXCVAR_GET(bd_opt_voice_type), 1, count);
+        task->language_cursor = static_cast<u32>(voiceType - 1);
+        BD_INFO("[voice-picker] seeded cursor from profile voice_type={} row={}",
+                voiceType, voiceType - 1);
+      }
+    }
+
+    if (count > 0) {
+      const bool oldOwns = bd::engine::MenuOwnsInput();
+      bd::engine::SetMenuOwnsInput(true);
+      const bool down = bd::engine::SynthesizedButton(Button::Down);
+      const bool up = bd::engine::SynthesizedButton(Button::Up);
+      bd::engine::SetMenuOwnsInput(oldOwns);
+
+      int cursor = static_cast<int>(u32(task->language_cursor));
+      if (down) {
+        cursor = (cursor + 1) % count;
+        task->language_cursor = static_cast<u32>(cursor);
+        BD_INFO("[voice-picker] keyboard down -> row {}", cursor);
+      } else if (up) {
+        cursor = (cursor + count - 1) % count;
+        task->language_cursor = static_cast<u32>(cursor);
+        BD_INFO("[voice-picker] keyboard up -> row {}", cursor);
+      }
+    }
+  } else {
+    s_voice_picker_active = false;
+  }
 
   // Resolve the built-in "DebugMenu" sequence id once. Only registered when
   // debugMenuBoot was set at boot (devmode), so 0 keeps the row hidden.

@@ -90,8 +90,13 @@ UploadState &upload_state() {
 // per draw, so a distance change applies without a restart (the dimension term
 // lags a pending restart-gated change until the map is recreated).
 void RecomputeShadowPcfScale(UploadState &s) {
+#if defined(__ANDROID__)
+  const f64 dist = std::clamp(ShadowCoverageScale(), 0.25, 4.0);
+  const f64 dim = std::max(128.0, static_cast<f64>(ShadowMapDimension()));
+#else
   const f64 dist = std::clamp(ShadowCoverageScale(), 1.0, 4.0);
   const f64 dim = std::max(512, Settings::Get().ShadowDimension());
+#endif
   s.shadowPcfScale = static_cast<float>(std::max(1.0 / dist, 1024.0 / dim));
 }
 

@@ -57,10 +57,9 @@ bool SetRenderResolution(const char *preset) {
   i32 w = 0, h = 0;
   if (!preset || !*preset ||
       !rex::graphics::video_mode_util::TryParseResolutionPreset(preset, w, h)) {
-    rex::cvar::ResetToDefault("resolution");
-    return true;
+    return rex::cvar::SetFlagByName("resolution", "", true);
   }
-  return rex::cvar::SetFlagByName("resolution", preset);
+  return rex::cvar::SetFlagByName("resolution", preset, true);
 }
 
 constexpr SettingOption kDisplayMode[] = {

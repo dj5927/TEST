@@ -186,8 +186,12 @@ bool s_selfWrite = false;
 
 template <typename T> bool WriteCvar(const char *name, T v) {
   s_selfWrite = true;
-  const bool ok = rex::cvar::SetFlagByName(name, FormatCvar(v));
+  const bool ok = rex::cvar::SetFlagByName(name, FormatCvar(v), true);
   s_selfWrite = false;
+#if defined(__ANDROID__)
+  if (ok)
+    rex::cvar::SaveConfig(bd::platform::ConfigFilePath());
+#endif
   return ok;
 }
 
