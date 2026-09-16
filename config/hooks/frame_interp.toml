@@ -414,3 +414,56 @@ name = "bdFrameFactorScaleHook"
 registers = ["f0"]
 after_instruction = false
 
+[[midasm_hook]]
+address = 0x82359564
+name = "bdTickCounterLerpHook"
+registers = ["f12", "r3"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x82386F28
+name = "bdTickCounterLerpHook"
+registers = ["f12", "r3"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x82369688
+name = "bdTickCounterLerpHook"
+registers = ["f12", "r31"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x8238108C
+name = "bdTickCounterLerpHook"
+registers = ["f0", "r31"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x8238066C
+name = "bdTickCounterLerpHook"
+registers = ["f0", "r31"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x82281804
+name = "bdUVAnimOffsetULerpHook"
+registers = ["f0", "r11"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x82281810
+name = "bdUVAnimOffsetVLerpHook"
+registers = ["f0", "r11"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x82281824
+name = "bdUVAnimOffsetULerpHook"
+registers = ["f0", "r11"]
+after_instruction = true
+
+[[midasm_hook]]
+address = 0x82281830
+name = "bdUVAnimOffsetVLerpHook"
+registers = ["f0", "r11"]
+after_instruction = true

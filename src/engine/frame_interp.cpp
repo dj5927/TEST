@@ -755,6 +755,42 @@ double FrameStepRatio() {
              : 1.0;
 }
 
+struct TickCounter {
+  double prev = 0.0;
+  double curr = 0.0;
+  u64 tick = 0;
+  u64 lastSeen = 0;
+};
+
+std::unordered_map<u32, TickCounter> g_tickCounters;
+
+constexpr u32 kUVAnimOffsetU = 0x1C;
+constexpr u32 kUVAnimOffsetV = 0x20;
+
+void LerpTickCounter(u32 key, PPCRegister &value) {
+  if (!bd::engine::InterpolationActive())
+    return;
+  const double live = value.f64;
+  const u64 tick = bd::engine::TickCount();
+  std::lock_guard<std::mutex> lock(g_interpMutex);
+  auto [it, inserted] = g_tickCounters.try_emplace(key);
+  TickCounter &c = it->second;
+  c.lastSeen = g_frame;
+  if (inserted) {
+    c.prev = live;
+    c.curr = live;
+    c.tick = tick;
+    return;
+  }
+  if (live != c.curr) {
+    c.prev = c.curr;
+    c.curr = live;
+    c.tick = tick;
+  }
+  if (c.tick == tick)
+    value.f64 = c.prev + (c.curr - c.prev) * bd::engine::Alpha();
+}
+
 } // namespace
 
 void bdFrameStepScaleHook(PPCRegister &step) { step.f64 *= FrameStepRatio(); }
@@ -771,6 +807,18 @@ void bdFrameFactorScaleHook(PPCRegister &factor) {
 void bdPopUpAgeLerpHook(PPCRegister &age) {
   if (bd::engine::InterpolationActive())
     age.f64 += bd::engine::Alpha();
+}
+
+void bdTickCounterLerpHook(PPCRegister &value, PPCRegister &owner) {
+  LerpTickCounter(owner.u32, value);
+}
+
+void bdUVAnimOffsetULerpHook(PPCRegister &value, PPCRegister &entry) {
+  LerpTickCounter(entry.u32 + kUVAnimOffsetU, value);
+}
+
+void bdUVAnimOffsetVLerpHook(PPCRegister &value, PPCRegister &entry) {
+  LerpTickCounter(entry.u32 + kUVAnimOffsetV, value);
 }
 
 void bdAnimeChainEnableActiveHook(PPCRegister &r28) {
@@ -1667,6 +1715,7 @@ constexpr u32 kEffRingSlotSize = 16;
 constexpr int kMaxEffEmitters = 256;
 constexpr int kMaxEffParticles = 8192;
 constexpr u64 kEffHistoryLinger = 4;
+constexpr u32 kMaxEffTrailPoints = 256;
 constexpr float kEffUVWrap = 0.5f;
 constexpr u32 kEffEmitterDefSize = 560;
 constexpr u32 kEffCurvesPerEmitter = 22;
@@ -1776,12 +1825,13 @@ struct EffParticlePose {
   float drawPos[3];
   float drawSize[3];
   float drawMatrix[16];
-  float trailHead[4];
 };
 
 struct EffParticleHistory {
   EffParticlePose prev;
   EffParticlePose curr;
+  std::vector<float> prevRing;
+  std::vector<float> currRing;
   u64 tick = 0;
   u32 spawned = 0;
   u32 captured = 0;
@@ -1877,17 +1927,65 @@ void ReadEffPose(const EffParticle_t &p, EffParticlePose &o) {
   ReadFloats(p.drawPos, o.drawPos, 3);
   ReadFloats(p.drawSize, o.drawSize, 3);
   ReadFloats(p.drawMatrix, o.drawMatrix, 16);
-  ReadFloats(p.trailHead, o.trailHead, 4);
 }
 
-be_f32 *EffTrailNewestSlot(const EffParticle_t &p, u32 flags) {
-  const u32 count = p.ringCount;
-  const u32 size = p.ringSize;
-  if ((flags & kEffEmitterTrail) == 0 || count == 0 || size == 0 ||
-      count > size)
-    return nullptr;
-  const u32 slot = (u32(p.ringHead) + count - 1) % size;
-  return bd::mem::try_at<be_f32>(u32(p.ring) + slot * kEffRingSlotSize);
+struct EffTrailRing {
+  u32 base = 0;
+  u32 count = 0;
+  u32 head = 0;
+  u32 size = 0;
+
+  EffTrailRing(const EffParticle_t &p, u32 flags) {
+    if ((flags & kEffEmitterTrail) == 0)
+      return;
+    const u32 ring = p.ring;
+    const u32 live = p.ringCount;
+    const u32 capacity = p.ringSize;
+    if (ring == 0 || capacity == 0 || capacity > kMaxEffTrailPoints ||
+        live > capacity)
+      return;
+    base = ring;
+    count = live;
+    head = p.ringHead;
+    size = capacity;
+  }
+
+  explicit operator bool() const { return base != 0; }
+
+  u32 Slot(u32 i) const {
+    return base + ((head + i) % size) * kEffRingSlotSize;
+  }
+};
+
+bool ReadEffTrail(const EffParticle_t &p, u32 flags, std::vector<float> &out) {
+  const EffTrailRing r(p, flags);
+  if (!r) {
+    out.clear();
+    return false;
+  }
+  out.resize(size_t(r.count) * 4);
+  for (u32 i = 0; i < r.count; ++i) {
+    auto *slot = bd::mem::try_at<const be_f32>(r.Slot(i));
+    if (!slot) {
+      out.clear();
+      return false;
+    }
+    ReadFloats(slot, &out[size_t(i) * 4], 4);
+  }
+  return true;
+}
+
+void WriteEffTrail(EffParticle_t &p, u32 flags, const std::vector<float> &pts) {
+  const EffTrailRing r(p, flags);
+  if (!r)
+    return;
+  const u32 n = std::min(r.count, u32(pts.size() / 4));
+  for (u32 i = 0; i < n; ++i) {
+    auto *slot = bd::mem::try_at<be_f32>(r.Slot(i));
+    if (!slot)
+      return;
+    WriteFloats(slot, &pts[size_t(i) * 4], 4);
+  }
 }
 
 void WriteEffPose(EffParticle_t &p, u32 flags, const EffParticlePose &o) {
@@ -1897,8 +1995,6 @@ void WriteEffPose(EffParticle_t &p, u32 flags, const EffParticlePose &o) {
   WriteFloats(p.drawPos, o.drawPos, 3);
   WriteFloats(p.drawSize, o.drawSize, 3);
   WriteFloats(p.drawMatrix, o.drawMatrix, 16);
-  if (be_f32 *slot = EffTrailNewestSlot(p, flags))
-    WriteFloats(slot, o.trailHead, 4);
 }
 
 void RestoreEffParticles(u32 sysEA) {
@@ -1910,6 +2006,7 @@ void RestoreEffParticles(u32 sysEA) {
     if (it == g_effHistory.end() || !it->second.served)
       return;
     WriteEffPose(p, em.flags, it->second.curr);
+    WriteEffTrail(p, em.flags, it->second.currRing);
     it->second.served = false;
   });
 }
@@ -1918,8 +2015,13 @@ void ShiftEffPose(EffParticlePose &o, const float delta[3]) {
   for (int k = 0; k < 3; ++k) {
     o.drawPos[k] -= delta[k];
     o.drawMatrix[12 + k] -= delta[k];
-    o.trailHead[k] -= delta[k];
   }
+}
+
+void ShiftEffTrail(std::vector<float> &pts, const float delta[3]) {
+  for (size_t i = 0; i + 4 <= pts.size(); i += 4)
+    for (int k = 0; k < 3; ++k)
+      pts[i + size_t(k)] -= delta[k];
 }
 
 void CaptureEffParticles(u32 sysEA) {
@@ -1956,10 +2058,17 @@ void CaptureEffParticles(u32 sysEA) {
         for (int k = 0; k < 3; ++k)
           delta[k] += motion->second.curr[k] - motion->second.prev[k];
       ShiftEffPose(h.prev, delta);
+      ReadEffTrail(p, em.flags, h.currRing);
+      h.prevRing = h.currRing;
+      ShiftEffTrail(h.prevRing, delta);
     } else if (h.tick + 1 == tick) {
       h.prev = h.curr;
+      h.prevRing.swap(h.currRing);
+      ReadEffTrail(p, em.flags, h.currRing);
     } else {
       h.prev = live;
+      ReadEffTrail(p, em.flags, h.currRing);
+      h.prevRing = h.currRing;
     }
     h.curr = live;
     h.tick = tick;
@@ -2003,6 +2112,7 @@ void BlendEffUV(const EffEmitterView &em, const EffParticle_t &p,
 void BlendEffParticles(u32 sysEA) {
   const u64 tick = bd::engine::TickCount();
   const float alpha = CutThisTick() ? 1.0f : bd::engine::Alpha();
+  std::vector<float> ring;
   ForEachEffParticle(sysEA, [&](const EffEmitterView &em, u32 ea,
                                 EffParticle_t &p) {
     auto it = g_effHistory.find(ea);
@@ -2011,13 +2121,28 @@ void BlendEffParticles(u32 sysEA) {
     EffParticleHistory &h = it->second;
     EffParticlePose out = h.curr;
     LerpElements(h.prev.drawPos, h.curr.drawPos, alpha, out.drawPos, 3);
-    LerpElements(h.prev.trailHead, h.curr.trailHead, alpha, out.trailHead, 4);
     LerpMatrix(h.prev.drawMatrix, h.curr.drawMatrix, alpha, out.drawMatrix);
     LerpElements(h.prev.size, h.curr.size, alpha, out.size, 3);
     LerpElements(h.prev.drawSize, h.curr.drawSize, alpha, out.drawSize, 3);
     LerpElements(h.prev.color, h.curr.color, alpha, out.color, 4);
     BlendEffUV(em, p, h, alpha, out.uv);
     WriteEffPose(p, em.flags, out);
+    if (!h.currRing.empty()) {
+      const int points = int(h.currRing.size() / 4);
+      const int older = int(h.prevRing.size() / 4);
+      const int lead = older - points;
+      ring.resize(h.currRing.size());
+      for (int i = 0; i < points; ++i) {
+        const float *curr = &h.currRing[size_t(i) * 4];
+        const int j = i + lead;
+        if (j >= 0 && j < older)
+          LerpElements(&h.prevRing[size_t(j) * 4], curr, alpha,
+                       &ring[size_t(i) * 4], 4);
+        else
+          std::copy_n(curr, 4, &ring[size_t(i) * 4]);
+      }
+      WriteEffTrail(p, em.flags, ring);
+    }
     h.served = true;
   });
 }
@@ -2212,9 +2337,91 @@ constexpr u32 kLightMaxEntries = 300;
 
 struct LightEntry_t {
   /* 0x00 */ be_u32 flags;
-  /* 0x04 */ u8 _pad004[0x4C - 0x04];
+  /* 0x04 */ u8 _pad004[0x14 - 0x04];
+  /* 0x14 */ be_f32 pos[3];
+  /* 0x20 */ u8 _pad020[0x2C - 0x20];
+  /* 0x2C */ be_f32 color[3];
+  /* 0x38 */ u8 _pad038[0x40 - 0x38];
+  /* 0x40 */ be_f32 luminance;
+  /* 0x44 */ u8 _pad044[0x48 - 0x44];
+  /* 0x48 */ be_f32 intensity;
 };
+static_assert(offsetof(LightEntry_t, pos) == 0x14);
+static_assert(offsetof(LightEntry_t, color) == 0x2C);
+static_assert(offsetof(LightEntry_t, luminance) == 0x40);
+static_assert(offsetof(LightEntry_t, intensity) == 0x48);
 static_assert(sizeof(LightEntry_t) == 0x4C);
+
+constexpr u32 kEffLightFloats = 8;
+constexpr u32 kLightShadowIndexOffset = 48028;
+constexpr u32 kLightTableOffset = 8;
+
+struct EffLightHistory {
+  float prev[kEffLightFloats];
+  float curr[kEffLightFloats];
+  u64 tick = 0;
+};
+
+std::unordered_map<u32, EffLightHistory> g_effLights;
+
+bool LightEntryInTable(u32 entry) {
+  return entry >= kLightEntriesEA &&
+         entry < kLightEntriesEA + kLightMaxEntries * sizeof(LightEntry_t);
+}
+
+void ReadEffLight(const LightEntry_t &e, float *out) {
+  ReadFloats(e.pos, out, 3);
+  ReadFloats(e.color, out + 3, 3);
+  out[6] = e.luminance;
+  out[7] = e.intensity;
+}
+
+void WriteEffLight(LightEntry_t &e, const float *in) {
+  WriteFloats(e.pos, in, 3);
+  WriteFloats(e.color, in + 3, 3);
+  e.luminance = in[6];
+  e.intensity = in[7];
+}
+
+void LerpEffLights(u32 lightSystem, std::vector<u32> &lerped) {
+  if (lightSystem + kLightTableOffset != kLightEntriesEA)
+    return;
+  const u64 tick = bd::engine::TickCount();
+  const i32 shadowIndex =
+      bd::mem::try_load<i32>(lightSystem + kLightShadowIndexOffset, -1);
+  const float alpha = CutThisTick() ? 1.0f : bd::engine::Alpha();
+  for (const auto &[entry, h] : g_effLights) {
+    if (h.tick != tick ||
+        i32((entry - kLightEntriesEA) / sizeof(LightEntry_t)) == shadowIndex)
+      continue;
+    auto *e = bd::mem::try_at<LightEntry_t>(entry);
+    if (!e)
+      continue;
+    float out[kEffLightFloats];
+    LerpElements(h.prev, h.curr, alpha, out, int(kEffLightFloats));
+    WriteEffLight(*e, out);
+    lerped.push_back(entry);
+  }
+}
+
+void RestoreEffLights(const std::vector<u32> &lerped) {
+  for (const u32 entry : lerped) {
+    const auto it = g_effLights.find(entry);
+    auto *e = bd::mem::try_at<LightEntry_t>(entry);
+    if (e && it != g_effLights.end())
+      WriteEffLight(*e, it->second.curr);
+  }
+}
+
+void PruneEffLights(u64 tick) {
+  static u64 prunedTick = 0;
+  if (prunedTick == tick)
+    return;
+  prunedTick = tick;
+  std::erase_if(g_effLights, [tick](const auto &kv) {
+    return tick - kv.second.tick > kEffHistoryLinger;
+  });
+}
 
 void SetChangedFlags(u32 count, bool set) {
   auto *list = bd::mem::at<be_u32>(kLightChangedListEA);
@@ -2495,14 +2702,44 @@ void ProjectBlended(PPCContext &ctx, bool radius) {
 
 } // namespace
 
+REX_EXTERN(__imp__bdEffectLightStep);
+REX_HOOK_RAW(bdEffectLightStep) {
+  const u32 record = ctx.r3.u32;
+  __imp__bdEffectLightStep(ctx, base);
+  if (!bd::engine::InterpolationActive())
+    return;
+  const u32 entry = bd::mem::try_load<u32>(record);
+  if (!LightEntryInTable(entry))
+    return;
+  auto *e = bd::mem::try_at<LightEntry_t>(entry);
+  if (!e)
+    return;
+  const u64 tick = bd::engine::TickCount();
+  auto [it, inserted] = g_effLights.try_emplace(entry);
+  EffLightHistory &h = it->second;
+  float live[kEffLightFloats];
+  ReadEffLight(*e, live);
+  if (inserted)
+    std::copy_n(live, kEffLightFloats, h.prev);
+  else if (h.tick != tick)
+    std::copy_n(h.curr, kEffLightFloats, h.prev);
+  std::copy_n(live, kEffLightFloats, h.curr);
+  h.tick = tick;
+}
+
 REX_EXTERN(__imp__bdLightListUpdateSnapshot);
 REX_HOOK_RAW(bdLightListUpdateSnapshot) {
-  u32 held = bd::engine::InterpolationActive()
-                 ? bd::mem::load<u32>(kLightChangedCountEA)
-                 : 0;
+  const bool interp = bd::engine::InterpolationActive();
+  u32 held = interp ? bd::mem::load<u32>(kLightChangedCountEA) : 0;
   if (held > kLightMaxEntries)
     held = 0;
+  std::vector<u32> lerped;
+  if (interp) {
+    LerpEffLights(ctx.r3.u32, lerped);
+    PruneEffLights(bd::engine::TickCount());
+  }
   __imp__bdLightListUpdateSnapshot(ctx, base);
+  RestoreEffLights(lerped);
   if (held == 0)
     return;
   SetChangedFlags(held, true);
@@ -2526,6 +2763,7 @@ void OnGameStep() {
     PruneStale(g_vec3Tracks);
     PruneStale(g_cameraPoints);
     PruneStale(g_animeClocks);
+    PruneStale(g_tickCounters);
     g_hudAnchors.BeginFrame();
     g_recordKeys.clear();
     PruneBoneArrays();
