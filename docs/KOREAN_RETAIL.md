@@ -70,12 +70,12 @@ set is **69 files**: 68 normal regional movies plus the BDop special case.
 For every converted file the tool verifies that removing synthesized C3 from
 the result reproduces the original Korean C1/C2/E0 packet-body sequence.
 
-## Intended installer workflow
+## Installer workflow
 
-The desired public workflow is:
+The preview installer implements this workflow:
 
 1. Install/extract a normal NTSC-U re:Blue base from the user's own discs.
-2. Choose **Import Korean retail data**.
+2. Use the separate **Optional Korean Retail Import** section.
 3. Select Korean Disc 1, Disc 2 and Disc 3 images.
 4. re:Blue copies Korean language and XACT voice resources from those discs.
 5. The installer converts the 69 regional SFDs to the compatible three-stream
@@ -84,9 +84,9 @@ The desired public workflow is:
 7. The NTSC-U `default.xex` used by re:Blue is kept; the Korean `default.xex`
    is not substituted into the US static-recompilation runtime.
 
-The current Python tool implements and validates step 5 on already-extracted
-Korean data. Integrating it directly into re:Blue's disc-install UI is the next
-packaging step.
+The C++ installer path performs the import directly from the selected Korean
+disc images. The Python tool remains as an independent dry-run/conversion
+validator for already-extracted Korean data.
 
 ## Files that must never be committed to this repository
 

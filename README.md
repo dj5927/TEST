@@ -78,10 +78,26 @@ The conversion logic has been dry-run against all three Korean retail disc
 data sets. It identifies the same **69 unique regional movies** used by the
 known-good Korean voice build; single-audio and silent SFDs are left unchanged.
 
-## Korean data preparation tool
+## Korean retail import
 
-The current preview tool works on a `game` folder already extracted from your
-own Korean retail discs:
+The preview desktop installer now has a separate **Optional Korean Retail
+Import** section. Keep the normal NTSC-U discs in **Install Sources**, then add
+Korean retail Disc 1, Disc 2 and Disc 3 in the Korean import section.
+
+When all three Korean discs are present, the installer:
+
+1. installs the normal NTSC-U base without replacing its `default.xex`;
+2. imports `pack/packmem_kr.ipk`, `snd_memory_kr` and `snd_stream_kr`;
+3. extracts only Korean records from `!necessity`, `sca` and `sequence` into
+   `mods/bd_asia_text`;
+4. converts the 69 two-track Korean regional SFDs to the compatible
+   three-stream topology;
+5. exposes KR in `bd_boot.ini` and enables the Korean text mod; and
+6. writes Korean UI/subtitle defaults with KR voice slot 2 into the profile.
+
+The standalone preparation tool remains available for validation or existing
+extracted data. It works on a `game` folder from the user's own Korean retail
+discs:
 
 ```powershell
 python tools\prepare_korean_data.py D:\BlueDragonKR\game
@@ -92,9 +108,6 @@ That command is a **dry run** and changes nothing. After reviewing the list:
 ```powershell
 python tools\prepare_korean_data.py D:\BlueDragonKR\game --apply
 ```
-
-The final goal is to integrate this step into the normal re:Blue disc installer
-so Korean Disc 1/2/3 can be selected directly for the regional-data import.
 
 See [docs/KOREAN_RETAIL.md](docs/KOREAN_RETAIL.md) for details.
 

@@ -54,6 +54,9 @@ struct WizardChoices {
   std::optional<bool> update_check;
   bool create_shortcut = false;
   bool reset_config = false;
+  // True when the optional Korean retail Disc 1/2/3 import completed. The
+  // finish step enables bd_asia_text and writes Korean UI/voice defaults.
+  bool korean_import = false;
 };
 
 // ImGuiDialog::Close() does 'delete this' and its destructor is not virtual.
@@ -87,6 +90,7 @@ private:
   void DrawContent();
   void DrawOptions();
   void DrawDiscs();
+  void DrawKoreanImport();
   void DrawDLCSection();
   void DrawPreferences();
   void DrawFooter();
@@ -100,8 +104,13 @@ private:
   void PickSource();
   void AddSource(const std::filesystem::path &file);
   void RemoveSource(int index);
+  void PickKoreanSource();
+  void AddKoreanSource(const std::filesystem::path &file);
+  void RemoveKoreanSource(int index);
   void PickInstallDir();
   bool AllDiscsFilled() const;
+  bool AnyKoreanDiscsFilled() const;
+  bool AllKoreanDiscsFilled() const;
   bool InputsReady() const;
   void StartInstall();
   void StartIndexRebuild();
@@ -129,6 +138,8 @@ private:
   };
   std::array<DiscSlot, kDiscCount> discs_;
   std::string sources_status_;
+  std::array<DiscSlot, kDiscCount> korean_discs_;
+  std::string korean_sources_status_;
 
   std::filesystem::path
       install_dir_; // install_dir/{game,user} created at install time

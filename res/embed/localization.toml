@@ -1144,6 +1144,7 @@ start.label.po = "Botão Start"
 
 [installer]
 repair_notice.us = "An existing install was detected. Select your discs to add or repair language files; files already installed are left in place."
+korean_import_notice.us = "Optional: owners of the Korean retail release can import Korean UI, subtitles and voices. The NTSC-U executable remains the base."
 repair_notice.de = "Eine bereits vorhandene Installation wurde gefunden. Wähle deine Disks aus um Sprachdateien hinzuzufügen oder zu reparieren, bereits installierte Dateien bleiben bestehen."
 repair_notice.es = "Se detectó una instalación existente. Selecciona tus discos para agregar o reparar archivos de idioma; los archivos ya instalados se mantienen."
 repair_notice.fr = "Une installation préexistante a été détectée. Sélectionnez des disques pour ajouter ou réparer des fichiers de langue; les fichiers déjà installés ne seront pas affectés"
@@ -1190,6 +1191,7 @@ options.po = "re:Blue - Opções"
 
 [installer.section]
 sources.us = "Install Sources"
+korean_import.us = "Optional Korean Retail Import"
 sources.de = "Quellen installieren"
 sources.es = "Fuentes de instalación"
 sources.fr = "Sources de l'installation"
@@ -1270,9 +1272,14 @@ bad_image.po = "Não foi possível ler como imagem de disco do Xbox 360"
 added.us = "Added {}"
 already_added.us = "Already added: {}"
 not_blue_dragon.us = "Invalid or unsupported disc image"
+korean_use_import.us = "Korean/Asian retail discs cannot be used as the NTSC-U base. Add them under Korean Retail Import instead."
+not_korean_retail.us = "This disc does not advertise Korean retail content."
+korean_added.us = "Korean retail source added: {}"
+korean_all_three.us = "Korean retail import requires Disc 1, Disc 2 and Disc 3."
 
 [installer.button]
 add_source.us = "Add Content Source"
+add_korean_source.us = "Add Korean Retail Source"
 change.us = "Change"
 change.de = "Ändern"
 change.es = "Cambiar"
@@ -1408,6 +1415,7 @@ spawn.po = "Falha ao iniciar a instalação: {}"
 
 [installer.dialog]
 select_source.us = "Select an ISO or GOD Container"
+select_korean_source.us = "Select Korean retail ISO or GOD Container"
 select_folder.us = "Select Install Location"
 select_folder.de = "Wähle Installationsordner"
 select_folder.es = "Seleccionar ubicación de instalación"

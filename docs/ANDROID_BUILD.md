@@ -40,6 +40,11 @@ For that reason Korean support is data import, not executable replacement:
    three-track topology expected by the NTSC-U runtime;
 4. select Korean UI and the KR voice slot in `reblue.toml`.
 
+The desktop disc installer in this preview exposes Korean retail import as a
+separate optional source set, so the Korean discs cannot accidentally replace
+the NTSC-U executable/base data. The resulting prepared `game` directory can
+then be selected by the Android launcher.
+
 See `KOREAN_RETAIL.md` and `../tools/prepare_korean_data.py`.
 
 ## Source-only repository rule

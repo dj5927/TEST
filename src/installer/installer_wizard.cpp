@@ -127,25 +127,73 @@ void InstallerWizard::AddSource(const std::filesystem::path &file) {
 
   std::string carried;
   std::string added;
+  bool rejected_korean = false;
   for (int i = 0; i < kDiscCount; ++i) {
     auto *root = image->Root(i + 1);
     if (!root)
       continue;
     Join(carried, kDiscLabels[i]);
+    const auto languages = ParseDiscLanguages(*root);
+    if (languages.contains("kr")) {
+      rejected_korean = true;
+      continue;
+    }
     if (discs_[i].Filled())
       continue;
     discs_[i].source = file;
     discs_[i].fingerprint = DiscFingerprint(image->ContentSize(), *root, i + 1);
-    discs_[i].languages = ParseDiscLanguages(*root);
+    discs_[i].languages = languages;
     Join(added, kDiscLabels[i]);
   }
 
   if (carried.empty())
     sources_status_ = i18n::Text("installer.status.not_blue_dragon");
+  else if (added.empty() && rejected_korean)
+    sources_status_ = i18n::Text("installer.status.korean_use_import");
   else if (added.empty())
     sources_status_ = i18n::Fmt("installer.status.already_added", carried);
   else
     sources_status_ = i18n::Fmt("installer.status.added", added);
+}
+
+void InstallerWizard::AddKoreanSource(const std::filesystem::path &file) {
+  auto image = DiscImage::Open(file);
+  if (!image) {
+    korean_sources_status_ = i18n::Text("installer.status.bad_image");
+    return;
+  }
+
+  std::string carried;
+  std::string added;
+  bool saw_non_korean = false;
+  for (int i = 0; i < kDiscCount; ++i) {
+    auto *root = image->Root(i + 1);
+    if (!root)
+      continue;
+    Join(carried, kDiscLabels[i]);
+    const auto languages = ParseDiscLanguages(*root);
+    if (!languages.contains("kr")) {
+      saw_non_korean = true;
+      continue;
+    }
+    if (korean_discs_[i].Filled())
+      continue;
+    korean_discs_[i].source = file;
+    korean_discs_[i].fingerprint =
+        DiscFingerprint(image->ContentSize(), *root, i + 1);
+    korean_discs_[i].languages = languages;
+    Join(added, kDiscLabels[i]);
+  }
+
+  if (carried.empty())
+    korean_sources_status_ = i18n::Text("installer.status.not_blue_dragon");
+  else if (added.empty() && saw_non_korean)
+    korean_sources_status_ = i18n::Text("installer.status.not_korean_retail");
+  else if (added.empty())
+    korean_sources_status_ =
+        i18n::Fmt("installer.status.already_added", carried);
+  else
+    korean_sources_status_ = i18n::Fmt("installer.status.korean_added", added);
 }
 
 void InstallerWizard::RemoveSource(int index) {
@@ -157,13 +205,34 @@ void InstallerWizard::RemoveSource(int index) {
   sources_status_.clear();
 }
 
+void InstallerWizard::RemoveKoreanSource(int index) {
+  const std::filesystem::path file = korean_discs_[index].source;
+  for (auto &slot : korean_discs_) {
+    if (slot.source == file)
+      slot = {};
+  }
+  korean_sources_status_.clear();
+}
+
 bool InstallerWizard::AllDiscsFilled() const {
   return std::all_of(discs_.begin(), discs_.end(),
                      [](const DiscSlot &s) { return s.Filled(); });
 }
 
+bool InstallerWizard::AnyKoreanDiscsFilled() const {
+  return std::any_of(korean_discs_.begin(), korean_discs_.end(),
+                     [](const DiscSlot &s) { return s.Filled(); });
+}
+
+bool InstallerWizard::AllKoreanDiscsFilled() const {
+  return std::all_of(korean_discs_.begin(), korean_discs_.end(),
+                     [](const DiscSlot &s) { return s.Filled(); });
+}
+
 bool InstallerWizard::InputsReady() const {
-  return AllDiscsFilled() && !install_dir_.empty();
+  const bool korean_ready =
+      !AnyKoreanDiscsFilled() || AllKoreanDiscsFilled();
+  return AllDiscsFilled() && korean_ready && !install_dir_.empty();
 }
 
 void InstallerWizard::PickSource() {
@@ -179,6 +248,21 @@ void InstallerWizard::PickSource() {
   if (!picked)
     return;
   AddSource(*picked);
+}
+
+void InstallerWizard::PickKoreanSource() {
+  const std::wstring anyLabel = Utf8ToWide(i18n::Text("installer.filter.any"));
+  const std::wstring isoLabel = Utf8ToWide(i18n::Text("installer.filter.iso"));
+  const bd::platform::FileFilter kSourceFilters[] = {
+      {anyLabel.c_str(), L"*.*"},
+      {isoLabel.c_str(), L"*.iso"},
+  };
+  auto picked = bd::platform::ShowOpenFileDialog(
+      Utf8ToWide(i18n::Text("installer.dialog.select_korean_source")).c_str(),
+      kSourceFilters);
+  if (!picked)
+    return;
+  AddKoreanSource(*picked);
 }
 
 void InstallerWizard::PickInstallDir() {
@@ -224,9 +308,13 @@ void InstallerWizard::StartInstall() {
   std::array<std::filesystem::path, kDiscCount> sources;
   for (int i = 0; i < kDiscCount; ++i)
     sources[i] = discs_[i].source;
+  std::array<std::filesystem::path, kDiscCount> korean_sources;
+  for (int i = 0; i < kDiscCount; ++i)
+    korean_sources[i] = korean_discs_[i].source;
+  choices_.korean_import = AllKoreanDiscsFilled();
   try {
-    install_thread_ =
-        Installer::RunAsync(sources, abs_game, repair_, progress_);
+    install_thread_ = Installer::RunAsync(sources, abs_game, repair_, progress_,
+                                          korean_sources);
   } catch (const std::system_error &e) {
     BD_ERROR("Installer::RunAsync failed to spawn worker: {}", e.what());
     progress_.SetError(i18n::Fmt("installer.error.spawn", e.what()));
@@ -492,9 +580,13 @@ void InstallerWizard::DrawContent() {
   }
 
   DrawDiscs();
+  ImGui::Dummy(ImVec2(0, 8));
+  DrawKoreanImport();
 
   std::set<std::string> detected;
   for (const auto &slot : discs_)
+    detected.insert(slot.languages.begin(), slot.languages.end());
+  for (const auto &slot : korean_discs_)
     detected.insert(slot.languages.begin(), slot.languages.end());
   ImGui::Dummy(ImVec2(0, 2));
   DrawLanguageLights(detected);
@@ -561,6 +653,61 @@ void InstallerWizard::DrawDiscs() {
     ImGui::SameLine(0, 12);
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(kStatus, "%s", sources_status_.c_str());
+  }
+}
+
+void InstallerWizard::DrawKoreanImport() {
+  SectionHeader(T("installer.section.korean_import"));
+  ImGui::TextWrapped("%s", T("installer.korean_import_notice"));
+  ImGui::Spacing();
+
+  const char *remove_label = T("installer.dlc.remove");
+  const float remove_width = ImGui::CalcTextSize(remove_label).x +
+                             ImGui::GetStyle().FramePadding.x * 2.0f + 16.0f;
+  const ImGuiTableFlags flags =
+      ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoBordersInBody;
+  if (ImGui::BeginTable("##korean_sources", 4, flags)) {
+    ImGui::TableSetupColumn("##kr_light", ImGuiTableColumnFlags_WidthFixed,
+                            ImGui::GetFrameHeight());
+    ImGui::TableSetupColumn("##kr_disc", ImGuiTableColumnFlags_WidthFixed,
+                            70.0f);
+    ImGui::TableSetupColumn("##kr_file", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("##kr_remove", ImGuiTableColumnFlags_WidthFixed,
+                            remove_width);
+
+    for (int i = 0; i < kDiscCount; ++i) {
+      ImGui::PushID(100 + i);
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      Light(korean_discs_[i].Filled());
+      ImGui::TableSetColumnIndex(1);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(kDiscLabels[i]);
+      ImGui::TableSetColumnIndex(2);
+      ImGui::AlignTextToFramePadding();
+      FilenameCell(korean_discs_[i].source);
+      ImGui::TableSetColumnIndex(3);
+      if (korean_discs_[i].Filled() &&
+          ImGui::Button(remove_label, ImVec2(remove_width, 0)))
+        RemoveKoreanSource(i);
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+
+  ImGui::Spacing();
+  ImGui::BeginDisabled(AllKoreanDiscsFilled());
+  if (ImGui::Button(T("installer.button.add_korean_source"), ImVec2(0, 0)))
+    PickKoreanSource();
+  ImGui::EndDisabled();
+  if (!korean_sources_status_.empty()) {
+    ImGui::SameLine(0, 12);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(kStatus, "%s", korean_sources_status_.c_str());
+  }
+  if (AnyKoreanDiscsFilled() && !AllKoreanDiscsFilled()) {
+    ImGui::Spacing();
+    ImGui::TextColored(kStatus, "%s", T("installer.status.korean_all_three"));
   }
 }
 

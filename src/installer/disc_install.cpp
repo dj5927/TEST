@@ -27,6 +27,7 @@
 #include "core/logging.h"
 #include "core/xcontent.h"
 #include "embedded.h"
+#include "installer/korean_import.h"
 #include "vfs/vfs.h"
 
 namespace bd::installer {
@@ -238,8 +239,10 @@ bool IsDamagedIPK(const std::string &relative_path, const fs::path &file) {
 std::thread
 Installer::RunAsync(const std::array<fs::path, kDiscCount> &sources,
                     const fs::path &game_data_dest, bool repair,
-                    InstallProgress &progress) {
-  return std::thread([sources, game_data_dest, repair, &progress]() {
+                    InstallProgress &progress,
+                    const std::array<fs::path, kDiscCount> &korean_sources) {
+  return std::thread([sources, game_data_dest, repair, korean_sources,
+                      &progress]() {
     std::map<fs::path, std::unique_ptr<DiscImage>> images;
     std::array<rex::filesystem::Entry *, kDiscCount> roots{};
     for (int i = 0; i < kDiscCount; ++i) {
@@ -415,6 +418,25 @@ Installer::RunAsync(const std::array<fs::path, kDiscCount> &sources,
     }
 
     if (progress.failed.load() || progress.canceled.load()) {
+      progress.complete.store(true);
+      return;
+    }
+
+    const bool any_korean =
+        std::any_of(korean_sources.begin(), korean_sources.end(),
+                    [](const fs::path &p) { return !p.empty(); });
+    const bool all_korean =
+        std::all_of(korean_sources.begin(), korean_sources.end(),
+                    [](const fs::path &p) { return !p.empty(); });
+    if (any_korean && !all_korean) {
+      progress.SetError(
+          "Korean retail import requires Disc 1, Disc 2 and Disc 3.");
+      progress.failed.store(true);
+      progress.complete.store(true);
+      return;
+    }
+    if (all_korean &&
+        !ImportKoreanRetailData(korean_sources, game_data_dest, progress)) {
       progress.complete.store(true);
       return;
     }
