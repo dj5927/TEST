@@ -26,4 +26,9 @@ plume::RenderSamplerDesc DecodeFromFetch(const u32 fc[6]);
 // path allocates from the bindless sampler heap).
 u32 ResolveSlotLocked(const plume::RenderSamplerDesc &desc);
 
+// Fixed-descriptor Android path: fetch/create the sampler object itself
+// without consuming or rewriting a global bindless descriptor slot.
+plume::RenderSampler *ResolveSamplerObjectLocked(
+    const plume::RenderSamplerDesc &desc);
+
 } // namespace bd::gpu

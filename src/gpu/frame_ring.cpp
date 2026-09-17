@@ -69,10 +69,12 @@ void BeginCommandList(VideoState &s) {
   }
   // Every host pipeline shares s.pipeline_layout, so switches keep these.
   s.command_list->setGraphicsPipelineLayout(s.pipeline_layout.get());
-  s.command_list->setGraphicsDescriptorSet(s.texture_descriptor_set.get(), 0);
-  s.command_list->setGraphicsDescriptorSet(s.texture_descriptor_set.get(), 1);
-  s.command_list->setGraphicsDescriptorSet(s.texture_descriptor_set.get(), 2);
-  s.command_list->setGraphicsDescriptorSet(s.sampler_descriptor_set.get(), 3);
+  if (!s.descriptor_compat_mode) {
+    s.command_list->setGraphicsDescriptorSet(s.texture_descriptor_set.get(), 0);
+    s.command_list->setGraphicsDescriptorSet(s.texture_descriptor_set.get(), 1);
+    s.command_list->setGraphicsDescriptorSet(s.texture_descriptor_set.get(), 2);
+    s.command_list->setGraphicsDescriptorSet(s.sampler_descriptor_set.get(), 3);
+  }
   FrameBegin(s.device.get(), s.command_list, cur);
   s.command_list_open = true;
   // IA + pipeline + root descriptor bindings do not survive begin().
@@ -224,6 +226,11 @@ void DrainSlot(VideoState &s, u32 slot) {
     // Same boundary for bindless slots retired while this slot last recorded:
     // only now is no in-flight list proven to still index them.
     DrainDescriptorSlotsLocked(s, slot);
+    // The reused frame slot is fenced and therefore idle. Keep the expensive
+    // Vulkan layout/pool/set objects alive and rewind only the slot-local
+    // allocation cursor. AllocateCompatDescriptorBundleLocked fully resets
+    // every descriptor before recording a new draw into the recycled set.
+    s.compat_descriptor_cursor[slot] = 0;
     // Closed here, not at the end of the function: the clear above is what
     // frees without a fence. Parks made later in this call go in
     // graveyard[slot] after the clear and survive to the next DrainSlot(slot),

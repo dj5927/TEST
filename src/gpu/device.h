@@ -293,6 +293,15 @@ u32 CurrentRenderPassId();
 // hides the swap hook stall. One would block on the GPU between every frame.
 constexpr u32 kNumFrames = 2;
 
+// Android compatibility path for Vulkan drivers without descriptor indexing.
+// Each draw owns four fixed 16-entry sets matching the X360's sampler slots.
+struct CompatDescriptorBundle {
+  std::unique_ptr<plume::RenderDescriptorSet> texture2D;
+  std::unique_ptr<plume::RenderDescriptorSet> texture3D;
+  std::unique_ptr<plume::RenderDescriptorSet> textureCube;
+  std::unique_ptr<plume::RenderDescriptorSet> samplers;
+};
+
 struct VideoState {
   // Non-owning. The app window outlives the renderer and is needed when an
   // Android resume supplies a new ANativeWindow under the same SDL window.
@@ -413,6 +422,10 @@ struct VideoState {
   std::vector<bool> sampler_descriptor_used;
   std::unique_ptr<plume::RenderSampler> default_sampler;
   std::unique_ptr<plume::RenderSampler> point_sampler;
+  bool descriptor_compat_mode = false;
+  bool descriptor_ubo_mode = false;
+  std::vector<CompatDescriptorBundle> compat_descriptor_bundles[kNumFrames];
+  u32 compat_descriptor_cursor[kNumFrames] = {};
 
   plume::RenderViewport viewport{0.0f, 0.0f, 1280.0f, 720.0f, 0.0f, 1.0f};
   bool design_canvas_drain = false;
@@ -559,6 +572,11 @@ bool BuildPipelineLayout(VideoState &s);
 bool BuildCopyPipeline(VideoState &s);
 bool BuildFramebuffers(VideoState &s);
 bool BuildPresentSemaphores(VideoState &s);
+CompatDescriptorBundle *AllocateCompatDescriptorBundleLocked(VideoState &s);
+void BindCompatDescriptorBundleLocked(VideoState &s,
+                                      CompatDescriptorBundle &bundle);
+bool BindCompatHostTextureLocked(VideoState &s, GuestTexture *texture,
+                                 plume::RenderSampler *sampler = nullptr);
 u32 AllocateSlot(VideoState &s);
 u32 BindTextureSRVLocked(VideoState &s, GuestTexture *tex);
 void ReleaseTextureSRVLocked(VideoState &s, GuestTexture *tex);

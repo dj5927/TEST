@@ -24,6 +24,9 @@
 #else
 #include "src/gpu/shaders/hlsl/imgui_ps.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/imgui_vs.hlsl.spirv.h"
+#if defined(__ANDROID__)
+#include "src/gpu/shaders/hlsl/imgui_ps.hlsl.compat.spirv.h"
+#endif
 #endif
 
 namespace bd::gpu {
@@ -119,13 +122,17 @@ bool ImGuiOverlayDrawer::UploadRGBA8Texture(
     return false;
   }
 
-  const u32 slot = Video::AllocateBindlessTextureSlot();
-  if (slot == UINT32_MAX) {
-    BD_ERROR("ImGui overlay: bindless texture slot pool exhausted");
-    return false;
+  auto &video_state = bd::gpu::state();
+  u32 slot = 0;
+  if (!video_state.descriptor_compat_mode) {
+    slot = Video::AllocateBindlessTextureSlot();
+    if (slot == UINT32_MAX) {
+      BD_ERROR("ImGui overlay: bindless texture slot pool exhausted");
+      return false;
+    }
+    video_state.texture_descriptor_set->setTexture(
+        slot, tex.get(), plume::RenderTextureLayout::SHADER_READ, view.get());
   }
-  bd::gpu::state().texture_descriptor_set->setTexture(
-      slot, tex.get(), plume::RenderTextureLayout::SHADER_READ, view.get());
 
   plume::RenderTextureBarrier pre(tex.get(),
                                   plume::RenderTextureLayout::COPY_DEST);
@@ -157,8 +164,18 @@ bool ImGuiOverlayDrawer::TryInitDeviceResources() {
 
   vs_ = device->createShader(REBLUE_SHADER_BLOB(imgui_vs), "main",
                              kHostShaderFormat);
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+  if (bd::gpu::state().descriptor_compat_mode) {
+    ps_ = device->createShader(REBLUE_COMPAT_SHADER_BLOB(imgui_ps), "main",
+                               kHostShaderFormat);
+  } else {
+    ps_ = device->createShader(REBLUE_SHADER_BLOB(imgui_ps), "main",
+                               kHostShaderFormat);
+  }
+#else
   ps_ = device->createShader(REBLUE_SHADER_BLOB(imgui_ps), "main",
                              kHostShaderFormat);
+#endif
   if (!vs_ || !ps_) {
     BD_ERROR("ImGui overlay: createShader failed");
     return false;
@@ -169,13 +186,27 @@ bool ImGuiOverlayDrawer::TryInitDeviceResources() {
   // global heap.
   plume::RenderDescriptorSetBuilder tex_b;
   tex_b.begin();
-  tex_b.addTexture(0, kSharedTextureSlots);
-  tex_b.end(true, kSharedTextureSlots);
+  if (bd::gpu::state().descriptor_compat_mode) {
+    // Match the Android mobile-core shader declaration. ImGui remaps the
+    // active draw texture to descriptor 0, so nine slots is already more than
+    // enough while keeping older mobile Vulkan implementations below their
+    // per-stage sampled-image limits.
+    tex_b.addTexture(0, 9);
+    tex_b.end();
+  } else {
+    tex_b.addTexture(0, kSharedTextureSlots);
+    tex_b.end(true, kSharedTextureSlots);
+  }
 
   plume::RenderDescriptorSetBuilder samp_b;
   samp_b.begin();
-  samp_b.addSampler(0, kSharedSamplerSlots);
-  samp_b.end(true, kSharedSamplerSlots);
+  if (bd::gpu::state().descriptor_compat_mode) {
+    samp_b.addSampler(0, 9);
+    samp_b.end();
+  } else {
+    samp_b.addSampler(0, kSharedSamplerSlots);
+    samp_b.end(true, kSharedSamplerSlots);
+  }
 
   plume::RenderPipelineLayoutBuilder lb;
   lb.begin(false, true);
@@ -305,10 +336,12 @@ void ImGuiOverlayDrawer::Begin(rex::ui::UIDrawContext &ctx, float coord_w,
   // layout active and sets bind against whatever layout is current.
   cmd_->setGraphicsPipelineLayout(layout_.get());
   cmd_->setPipeline(pipeline_.get());
-  cmd_->setGraphicsDescriptorSet(bd::gpu::state().texture_descriptor_set.get(),
-                                 0);
-  cmd_->setGraphicsDescriptorSet(bd::gpu::state().sampler_descriptor_set.get(),
-                                 1);
+  if (!bd::gpu::state().descriptor_compat_mode) {
+    cmd_->setGraphicsDescriptorSet(
+        bd::gpu::state().texture_descriptor_set.get(), 0);
+    cmd_->setGraphicsDescriptorSet(
+        bd::gpu::state().sampler_descriptor_set.get(), 1);
+  }
 
   // Ortho projection push constant (b0,space2, VERTEX range 0), y flipped.
   struct Ortho {
@@ -359,10 +392,29 @@ void ImGuiOverlayDrawer::Draw(const rex::ui::ImmediateDraw &draw) {
 
   u32 tex_slot = white_slot_;
   u32 samp_slot = 0;
+  plume::RenderTexture *draw_texture = white_texture_.get();
+  plume::RenderTextureView *draw_view = white_view_.get();
   if (draw.texture) {
     auto *tex = static_cast<PlumeImmediateTexture *>(draw.texture);
     tex_slot = tex->tex_slot();
     samp_slot = tex->sampler_slot();
+    draw_texture = tex->texture();
+    draw_view = tex->view();
+  }
+  auto &video_state = bd::gpu::state();
+  if (video_state.descriptor_compat_mode) {
+    CompatDescriptorBundle *bundle =
+        AllocateCompatDescriptorBundleLocked(video_state);
+    if (!bundle || !draw_texture || !draw_view)
+      return;
+    bundle->texture2D->setTexture(
+        0, draw_texture, plume::RenderTextureLayout::SHADER_READ, draw_view);
+    bundle->samplers->setSampler(0, video_state.default_sampler.get());
+    // ImGui's private layout has texture set 0 and sampler set 1.
+    cmd_->setGraphicsDescriptorSet(bundle->texture2D.get(), 0);
+    cmd_->setGraphicsDescriptorSet(bundle->samplers.get(), 1);
+    tex_slot = 0;
+    samp_slot = 0;
   }
   u32 slots[2] = {tex_slot, samp_slot};
   cmd_->setGraphicsPushConstants(1, slots, 0, sizeof(slots)); // PIXEL range 1

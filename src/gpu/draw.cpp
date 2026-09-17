@@ -304,44 +304,70 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
   // Vulkan push offsets 0/8/16 follow the guest PushConstants member order
   // emitted by the recompiler.
   if (device_guest) {
-    if (s.dirtyStates.vertexShaderConstants) {
-      auto vs_alloc = UploadVertexShaderConstants(device_guest);
+    ConstantAllocation vs_alloc{};
+    ConstantAllocation ps_alloc{};
+
+    if (s.dirtyStates.vertexShaderConstants || s.descriptor_ubo_mode) {
+      vs_alloc = UploadVertexShaderConstants(
+          device_guest, s.dirtyStates.vertexShaderConstants);
       if (vs_alloc.size) {
 #if defined(REBLUE_D3D12)
         s.command_list->setGraphicsRootDescriptor(vs_alloc.ref, 0);
 #else
-        s.command_list->setGraphicsPushConstants(
-            kGuestPushConstantRangeIndex, &vs_alloc.gpuAddress, 0, sizeof(u64));
+        if (!s.descriptor_ubo_mode) {
+          s.command_list->setGraphicsPushConstants(
+              kGuestPushConstantRangeIndex, &vs_alloc.gpuAddress, 0,
+              sizeof(u64));
+        }
 #endif
       }
     }
 
-    if (s.dirtyStates.pixelShaderConstants) {
-      auto ps_alloc = UploadPixelShaderConstants(device_guest);
+    if (s.dirtyStates.pixelShaderConstants || s.descriptor_ubo_mode) {
+      ps_alloc = UploadPixelShaderConstants(
+          device_guest, s.dirtyStates.pixelShaderConstants);
       if (ps_alloc.size) {
 #if defined(REBLUE_D3D12)
         s.command_list->setGraphicsRootDescriptor(ps_alloc.ref, 1);
 #else
-        s.command_list->setGraphicsPushConstants(kGuestPushConstantRangeIndex,
-                                                 &ps_alloc.gpuAddress,
-                                                 sizeof(u64), sizeof(u64));
+        if (!s.descriptor_ubo_mode) {
+          s.command_list->setGraphicsPushConstants(kGuestPushConstantRangeIndex,
+                                                   &ps_alloc.gpuAddress,
+                                                   sizeof(u64), sizeof(u64));
+        }
 #endif
       }
+    }
+
+    if (s.descriptor_ubo_mode && (!vs_alloc.size || !ps_alloc.size)) {
+#if defined(__ANDROID__)
+      android_fail("ubo_vs_ps_upload_failed");
+#endif
+      return false;
     }
 
     // SharedConstants rebuilds from live guest state every draw: the sampler
     // fetch constants are written by unhooked recompiled code, so there is no
     // dirty signal. The upload is skipped internally when the built block is
     // byte-identical to the one already bound on this list.
-    auto sc_alloc = UploadSharedConstants(device_guest);
+    auto sc_alloc = UploadSharedConstants(
+        device_guest, s.descriptor_ubo_mode ? &vs_alloc : nullptr,
+        s.descriptor_ubo_mode ? &ps_alloc : nullptr);
     if (sc_alloc.size) {
 #if defined(REBLUE_D3D12)
       s.command_list->setGraphicsRootDescriptor(sc_alloc.ref, 2);
 #else
-      s.command_list->setGraphicsPushConstants(kGuestPushConstantRangeIndex,
-                                               &sc_alloc.gpuAddress,
-                                               2 * sizeof(u64), sizeof(u64));
+      if (!s.descriptor_ubo_mode) {
+        s.command_list->setGraphicsPushConstants(kGuestPushConstantRangeIndex,
+                                                 &sc_alloc.gpuAddress,
+                                                 2 * sizeof(u64), sizeof(u64));
+      }
 #endif
+    } else if (s.descriptor_ubo_mode) {
+#if defined(__ANDROID__)
+      android_fail("ubo_shared_upload_or_bind_failed");
+#endif
+      return false;
     }
   }
 

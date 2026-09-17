@@ -13,6 +13,13 @@ reblue_shader_cache(
     INCLUDE_FILE  "${REBLUE_SHADER_COMMON_H}"
     OUTPUT_CPP    "${REBLUE_GEN_DIR}/shader_cache.cpp")
 set(REBLUE_GENERATED_SOURCES "${REBLUE_GEN_DIR}/shader_cache.cpp")
+if(ANDROID)
+    # Keep all Android guest-shader layouts in one binary: fast bindless,
+    # compact fixed descriptors with BDA, and the Vulkan-1.1 UBO fallback.
+    list(APPEND REBLUE_GENERATED_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/android_prebuilt/shader_cache_bindless_wrapper.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/android_prebuilt/shader_cache_ubo_wrapper.cpp")
+endif()
 
 foreach(shader IN ITEMS copy_vs bd_2d_blit_vs imgui_vs)
     reblue_host_shader(${shader} vs_6_0)

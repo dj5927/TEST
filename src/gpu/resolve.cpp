@@ -306,7 +306,14 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
     }
     s.command_list->setPipeline(pipeline);
     NotePSOSwitch();
-    const u32 descriptor_index = src->descriptorIndex;
+    u32 descriptor_index = src->descriptorIndex;
+    if (s.descriptor_compat_mode) {
+      if (!BindCompatHostTextureLocked(s, src, s.default_sampler.get())) {
+        BD_ERROR("{}: failed to bind compatibility resolve source", reason);
+        return false;
+      }
+      descriptor_index = 0;
+    }
 
     u32 box_ratio = 0u;
     if (!depth_dst && src->sampleCount == plume::RenderSampleCount::COUNT_1 &&

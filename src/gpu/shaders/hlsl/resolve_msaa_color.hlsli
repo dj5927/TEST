@@ -5,7 +5,11 @@
 // heap. plume creates a Texture2DMS SRV automatically when the source
 // texture's sampleCount > 1. Declaring the heap as Texture2DMS here reads
 // that descriptor correctly (mirrors UR's g_Texture2DMSDescriptorHeap).
+#if defined(REBLUE_DESCRIPTOR_COMPAT)
+Texture2DMS<float4, SAMPLE_COUNT> g_Texture2DMSDescriptorHeap[9] : register(t0, space0);
+#else
 Texture2DMS<float4, SAMPLE_COUNT> g_Texture2DMSDescriptorHeap[] : register(t0, space0);
+#endif
 
 float4 main(in float4 position : SV_Position, in float2 texCoord : TEXCOORD) : SV_Target
 {

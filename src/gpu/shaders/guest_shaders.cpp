@@ -40,16 +40,37 @@
 #else
 #include "src/gpu/shaders/hlsl/bd_pe_ps_brightpass_clamp.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/bd_pe_ps_ms_bright_clamp.hlsl.spirv.h"
+#if defined(__ANDROID__)
+#include "src/gpu/shaders/hlsl/bd_pe_ps_brightpass_clamp.hlsl.compat.spirv.h"
+#include "src/gpu/shaders/hlsl/bd_pe_ps_ms_bright_clamp.hlsl.compat.spirv.h"
+#endif
 #include <smolv.h>
 #endif
 
 namespace bd::gpu {
 
 namespace {
+ShaderCacheEntry *ActiveShaderCacheEntries(size_t &count) {
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+  if (state().descriptor_ubo_mode) {
+    count = g_uboShaderCacheEntryCount;
+    return g_uboShaderCacheEntries;
+  }
+  if (!state().descriptor_compat_mode) {
+    count = g_bindlessShaderCacheEntryCount;
+    return g_bindlessShaderCacheEntries;
+  }
+#endif
+  count = g_shaderCacheEntryCount;
+  return g_shaderCacheEntries;
+}
+
 ShaderCacheEntry *FindShaderCacheEntry(u64 hash) {
-  auto *end = g_shaderCacheEntries + g_shaderCacheEntryCount;
+  size_t count = 0;
+  ShaderCacheEntry *first = ActiveShaderCacheEntries(count);
+  auto *end = first + count;
   auto *result = std::lower_bound(
-      g_shaderCacheEntries, end, hash,
+      first, end, hash,
       [](const ShaderCacheEntry &lhs, u64 rhs) { return lhs.hash < rhs; });
   return (result != end && result->hash == hash) ? result : nullptr;
 }
@@ -123,8 +144,46 @@ const LinkedShaderCacheEntry *FindLinkedShaderCacheEntry(u64 hash, u32 masked) {
 // modules smol-v encoded. Decompressed once on first shader resolve.
 std::once_flag g_spirv_cache_once;
 std::unique_ptr<u8[]> g_spirv_cache;
+#if defined(__ANDROID__)
+std::once_flag g_bindless_spirv_cache_once;
+std::unique_ptr<u8[]> g_bindless_spirv_cache;
+std::once_flag g_ubo_spirv_cache_once;
+std::unique_ptr<u8[]> g_ubo_spirv_cache;
+#endif
 
 const u8 *SpirvCache() {
+#if defined(__ANDROID__)
+  if (state().descriptor_ubo_mode) {
+    std::call_once(g_ubo_spirv_cache_once, [] {
+      g_ubo_spirv_cache =
+          std::make_unique<u8[]>(g_uboSpirvCacheDecompressedSize);
+      const size_t n = ZSTD_decompress(
+          g_ubo_spirv_cache.get(), g_uboSpirvCacheDecompressedSize,
+          g_uboCompressedSpirvCache, g_uboSpirvCacheCompressedSize);
+      if (ZSTD_isError(n) || n != g_uboSpirvCacheDecompressedSize) {
+        BD_ERROR("UBO SPIR-V shader cache decompression failed ({} of {} bytes)",
+                 n, g_uboSpirvCacheDecompressedSize);
+        g_ubo_spirv_cache.reset();
+      }
+    });
+    return g_ubo_spirv_cache.get();
+  }
+  if (!state().descriptor_compat_mode) {
+    std::call_once(g_bindless_spirv_cache_once, [] {
+      g_bindless_spirv_cache =
+          std::make_unique<u8[]>(g_bindlessSpirvCacheDecompressedSize);
+      const size_t n = ZSTD_decompress(
+          g_bindless_spirv_cache.get(), g_bindlessSpirvCacheDecompressedSize,
+          g_bindlessCompressedSpirvCache, g_bindlessSpirvCacheCompressedSize);
+      if (ZSTD_isError(n) || n != g_bindlessSpirvCacheDecompressedSize) {
+        BD_ERROR("bindless SPIR-V shader cache decompression failed ({} of {} bytes)",
+                 n, g_bindlessSpirvCacheDecompressedSize);
+        g_bindless_spirv_cache.reset();
+      }
+    });
+    return g_bindless_spirv_cache.get();
+  }
+#endif
   std::call_once(g_spirv_cache_once, [] {
     g_spirv_cache = std::make_unique<u8[]>(g_spirvCacheDecompressedSize);
     const size_t n =
@@ -146,14 +205,40 @@ const u8 *SpirvCache() {
 // into giant white blobs. These two masks are substituted by copies whose
 // export is clamped to [0,1].
 bool BloomMaskClampBlob(u64 hash, const void *&blob, size_t &size) {
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+  // The clamp substitutes still use the BDA SharedConstants ABI. Legacy UBO
+  // mode uses the original guest shader from the UBO cache instead.
+  if (state().descriptor_ubo_mode)
+    return false;
+#endif
   switch (hash) {
   case 0xFFDBD782126EB6E8ull: // bd_pe_ps_brightpass
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+    if (state().descriptor_compat_mode) {
+      blob = REBLUE_COMPAT_BLOB_SYMBOL(bd_pe_ps_brightpass_clamp);
+      size = sizeof(REBLUE_COMPAT_BLOB_SYMBOL(bd_pe_ps_brightpass_clamp));
+    } else {
+      blob = REBLUE_BLOB_SYMBOL(bd_pe_ps_brightpass_clamp);
+      size = sizeof(REBLUE_BLOB_SYMBOL(bd_pe_ps_brightpass_clamp));
+    }
+#else
     blob = REBLUE_BLOB_SYMBOL(bd_pe_ps_brightpass_clamp);
     size = sizeof(REBLUE_BLOB_SYMBOL(bd_pe_ps_brightpass_clamp));
+#endif
     return true;
   case 0xD386EA2FABF16CE9ull: // bd_pe_ps_ms_bright
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+    if (state().descriptor_compat_mode) {
+      blob = REBLUE_COMPAT_BLOB_SYMBOL(bd_pe_ps_ms_bright_clamp);
+      size = sizeof(REBLUE_COMPAT_BLOB_SYMBOL(bd_pe_ps_ms_bright_clamp));
+    } else {
+      blob = REBLUE_BLOB_SYMBOL(bd_pe_ps_ms_bright_clamp);
+      size = sizeof(REBLUE_BLOB_SYMBOL(bd_pe_ps_ms_bright_clamp));
+    }
+#else
     blob = REBLUE_BLOB_SYMBOL(bd_pe_ps_ms_bright_clamp);
     size = sizeof(REBLUE_BLOB_SYMBOL(bd_pe_ps_ms_bright_clamp));
+#endif
     return true;
   default:
     return false;
@@ -187,8 +272,9 @@ GuestShader *CreateShader(const be_u32 *function, ResourceType type) {
     shader->shaderCacheEntry = entry;
 #if defined(__ANDROID__)
     bd::AndroidDiag(std::format(
-        "shader_create cache_hit hash=0x{:016X} type={} spirv_off={} spirv_size={}",
-        hash, static_cast<u32>(type), entry->spirvOffset, entry->spirvSize));
+        "shader_create cache_hit mode={} hash=0x{:016X} type={} spirv_off={} spirv_size={}",
+        state().descriptor_compat_mode ? "compat" : "bindless", hash,
+        static_cast<u32>(type), entry->spirvOffset, entry->spirvSize));
 #endif
   } else {
     BD_WARN("Shader cache miss: hash=0x{:016X} len={} type={}", hash, hash_len,

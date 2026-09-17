@@ -17,15 +17,15 @@ function(reblue_shader_cache)
         # target would be an Android executable and therefore cannot run on the
         # Windows build host. Reuse the architecture-independent cache emitted
         # by the known-good desktop build instead.
-        set(prebuilt "${CMAKE_CURRENT_SOURCE_DIR}/android_prebuilt/shader_cache.cpp")
+        set(prebuilt "${CMAKE_CURRENT_SOURCE_DIR}/android_prebuilt/shader_cache_mobile_core.cpp")
         if(NOT EXISTS "${prebuilt}")
-            message(FATAL_ERROR "Android prebuilt shader_cache.cpp is missing")
+            message(FATAL_ERROR "Android mobile-core shader cache is missing")
         endif()
         add_custom_command(
             OUTPUT "${ARG_OUTPUT_CPP}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${prebuilt}" "${ARG_OUTPUT_CPP}"
             DEPENDS "${prebuilt}"
-            COMMENT "Using prebuilt Xenos shader cache for Android"
+            COMMENT "Using compact Vulkan-core Xenos shader cache for Android"
             VERBATIM)
         add_custom_target(reblue_shader_cache_gen DEPENDS "${ARG_OUTPUT_CPP}")
         add_custom_target(reblue_shader_hlsl_dump)

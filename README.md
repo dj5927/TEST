@@ -1,174 +1,125 @@
-<h1 align="center">
-  <img width="1480" height="662" alt="Untitled-1" src="https://github.com/user-attachments/assets/1779fdfd-bc3a-416d-8b6c-38874d8eae93" />
-  <a href="https://discord.gg/92MCyYDpuY">
-    <img src="https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white" alt="Discord">
-  </a>
-</h1>
+# re:Blue Android (preview)
 
-> [!IMPORTANT]
-> re:Blue is an unofficial project
+Unofficial Android port work for [re:Blue](https://github.com/zolaware/reblue),
+the native static-recompilation project for **Blue Dragon**.
 
+This repository is intended to contain **code and tools only**. It does not
+contain Blue Dragon disc images, `default.xex`, voice banks, movies, Korean
+text assets, or any other retail game data. You must use your own legally
+obtained Blue Dragon discs/images.
 
-# re:Blue
+## Current goals
 
-re:Blue rebuilds Blue Dragon as a native application through static recompilation, translating the original code into something your machine runs directly rather than emulating a console around it. That opens the door to things an emulator cannot reach: higher frame rates, modern resolutions, and real mod support.
+- Run the normal NTSC-U / English re:Blue data set on Android ARM64 + Vulkan.
+- Keep the Android runtime language-neutral instead of forcing Korean data.
+- Support touch controls, physical controllers, Android vibration, external
+  game-data folders, and mobile Vulkan compatibility paths.
+- Add an optional **Korean retail data import** path for owners of the Korean
+  Blue Dragon discs.
 
-## Table of Contents
+## Important: Korean discs and the recompiled executable
 
-- [Hardware Requirements](#hardware-requirements)
-- [How to Install](#how-to-install)
-- [Features](#features)
-- [FAQ](#faq)
-- [Building](#building)
-- [Credits](#credits)
-- [License](#license)
+re:Blue is statically recompiled from the NTSC-U executable. The Korean/Asian
+retail `default.xex` has a different code layout and entry point, so replacing
+the NTSC-U runtime XEX with the Korean XEX is **not** considered safe or
+supported by this preview.
 
-## Hardware Requirements
+The known-good Korean configuration therefore uses:
 
-Requires all three retail Blue Dragon discs or their disc images. Steam Deck is supported. 64-bit ARM processors are supported on Linux and macOS. Windows is x86-64 only. 
+1. a normal NTSC-U re:Blue base install, and
+2. data imported from the user's own Korean retail Disc 1/2/3.
 
-### Minimum
+The import keeps the US-code runtime while adding Korean text/voice resources.
+Nothing from the retail discs is redistributed here.
 
-- OS: Windows 10 version 1909 or later, Ubuntu 24.04 / Fedora 40 / SteamOS 3.6 or later, or macOS 13.3 Ventura or later
-- Processor: Intel Core i5-4460 3.2 GHz 4 Core or AMD Ryzen 3 1200 or Apple M1, or equivalent
-- Memory: 8 GB RAM
-- GPU: Nvidia GTX 1050 Ti or AMD RX 570, or equivalent performance & VRAM. DirectX 12 with Shader Model 6.0, or Vulkan 1.2, or Metal
-- Storage: 15 GB available space
+## Korean voice architecture
 
-### Recommended
+Korean retail `bd_boot.ini` exposes:
 
-- OS: Windows 11, SteamOS 3.6, or macOS 14 Sonoma or later
-- Processor: AMD Ryzen 5 5600X or Intel Core i5-12400 or Apple M2, or equivalent performance, 6 physical cores minimum
-- Memory: 16 GB RAM
-- GPU: Nvidia RTX 2060 or AMD RX 5700, or equivalent performance & VRAM. 8 GB VRAM for 4K with MSAA
-- Storage: 15 GB available space
-
-## How to Install
-
-[Download latest release for your platform](https://github.com/zolaware/reblue/releases/latest) or [build yourself](#building)
-
-1. Blue Dragon shipped on three DVDs, and you will need a disc image of each one from your own copy of the game.
-
-2. Run the executable. A setup wizard will guide you through the rest. You will be asked to point it at each of the three disc images in turn, and it will check each one before letting you continue. Once you pick where to install, the program copies itself there and restarts from that location, so you can delete the folder you extracted the zip into.
-
-3. Pick a graphics quality preset. The wizard copies the game files out of the discs, and you are done. You may also install DLC from this installer or from the main menu under the config menu
-
-The wizard only needs to run once. If something later goes missing from your install, launching with `--repair` reopens it on your existing install and copies back only what it needs.
-
-## Features
-
-Everything below is new to re:Blue. All of it is configurable in game, from the title screen or the camp menu.
-
-### Graphics
-
-- Resolutions up to 4K, windowed or fullscreen, on whichever monitor you pick
-- Aspect ratios 16:9, 4:3, 16:10, 21:9, 32:9, plus auto and stretch
-- Four quality presets, Low through Ultra
-- MSAA up to 8x or SSAA up to 4x
-- Anisotropic filtering
-- Shadow quality and draw distance
-- Depth of field adjustment
-- Unlocked FPS with optional caps and VSync
-
-### Quality of Life
-
-- Unlocked frame rate, with optional caps at 30, 60, 90, or 120
-- Save from the camp menu anywhere instead of only at save points
-- Field of view adjustment, 45 through 120 degrees
-- Skip the in-game tutorial pages
-- Full area map on the world map screen, with zoom, floor switching, and a legend
-- Optional map markers for the hidden items, chests, and barriers a floor still has, plus per-floor counts, carried onto the field compass
-- The field HUD can fade out once you stop pressing anything, or stay off entirely
-- Achievement list viewable in game, with eight new re:Blue achievements alongside the original ones
-- Master volume control
-- Separate center, rear, and subwoofer levels for 5.1/7.1 tuning
-- Fully native keyboard and mouse support with cursor and look modes supported by mouse
-- Every controller button rebindable to a key, with mouse sensitivity and cursor opacity of your own
-- Menus take the mouse directly: hover a row to move the cursor, click to confirm, wheel to scroll
-- Custom input based icons/glyphs for hud elements, following the device you last used or pinned to Xbox, PlayStation, Switch, or Steam Deck
-- UI language and voice language chosen separately
-
-
-### Mods and DLC
-
-- Built-in mod manager
-- Official DLC is supported
-
-### Platforms and Languages
-
-- Windows on DX12 or Vulkan
-- Linux AMD64 and ARM64, including the Steam Deck and other handhelds
-- macOS AMD64 and ARM64
-- Custom menus in English, French, German, Italian, and Spanish
-
-## FAQ
-
-### Where is my save data and configuration stored?
-
-Everything lives under the folder you installed to:
-
-- Saves and settings: `profiles\default\`
-- Your configuration file: `profiles\default\reblue.toml`
-- Game files copied from your discs: `game\`
-- Mods: `mods\`
-
-### I want to update the game. Will I lose my save data?
-
-No. Copy a newer build over your existing installation and your saves, settings, and mods are left alone. You do not need to reinstall or point the wizard at your discs again.
-
-### How do I install mods?
-
-Use the mod manager in the config menu. It accepts a mod folder or a zip file and puts everything in the right place for you
-
-### Can I keep more than one set of saves?
-
-Yes. Each profile is its own folder under `profiles\`, holding that profile's saves, settings, achievements, and DLC toggles. Launch with `--profile <name>` to pick one, and anything but `default` starts out fresh.
-
-## Building
-
-re:Blue builds with CMake and vcpkg against the [ReXGlue SDK](https://github.com/rexglue/rexglue-sdk).
-
-```sh
-cmake --preset win-amd64-release       # or linux-amd64-release
-cmake --build --preset win-amd64-release
+```ini
+[Language] US TW KR
+[Voice] JP KR
 ```
 
-Presets cover `win-amd64`, `win-vk`, `linux-amd64`, `linux-arm64`, `mac-amd64`, and `mac-arm64`, each in Debug, Release, and RelWithDebInfo. A `win-amd64` preset builds both the DX12 executable (`reblue.exe`) and the Vulkan one (`reblue_vk.exe`), and a `win-vk` one builds the Vulkan executable alone. As with running the game, building requires the files from your own copy of Blue Dragon.
+For normal dialogue, re:Blue can use the retail Korean XACT data directly:
 
-## Credits
+- `snd_memory_kr`
+- `snd_stream_kr`
+- `pack/packmem_kr.ipk`
 
-Huge thanks to everyone who has put time into this. re:Blue would not be where it is without you.
+The Korean voice is the second entry in `[Voice]`, so the known-good setting is:
 
-### re:Blue Development Team
+```toml
+user_language = 7
+bd_language = "kr"
+bd_opt_voice_type = 2
+bd_opt_subtitles = 1
+```
 
-- **[crack](https://github.com/tomcl7)** project lead and developer
+### Cutscene movies
 
-- **[rcold](https://github.com/RC0ld)** developer and has done an absurd amount for this project. A lot of re:Blue looks the way it does because of him.
+Korean retail Sofdec movies normally contain two audio streams:
 
-### Playtesting and Support
+- C1 = Japanese
+- C2 = Korean
 
-- **[infernozotza](https://github.com/Zotza)** - Playtester 
-- **baus.98** - Playtester
-- **[wolfaeterni](https://github.com/Zolawolf)** - Playtester and French Translations 
-- **[griever666.](https://github.com/grv666)** - Playtester
-- **[fungus](https://github.com/fungoid-creature)** - Playtester
-- **[graine25](https://github.com/Graine25)** - macOS and Linux Development Support
-- **[zhyxeryz](https://github.com/Zhyxeryz)** - Playtester and German Translations
-- **[Azar42](https://github.com/Azar42)** - Playtesting
-- **[ZolaKluke](https://github.com/ZolaKluke)** - Playtester
-- **[emersed](https://github.com/RaphyEmersed)** - Playtester
-- **[mrcmunir](https://github.com/mrcmunir)** - Spanish Translations
-- **[mystixor](https://github.com/mystixor)** - German Translations
-- **[toby](https://github.com/TbyDtch)** - Graphic Design
+The NTSC-U re:Blue runtime expects the three-stream topology used by the US
+disc. The included `tools/prepare_korean_data.py` converts only the affected
+movies into a compatible three-stream layout while preserving Korean-retail
+video/audio PES bodies:
 
-### Special Thanks
+- normal regional movie: C1=JP, C2=KR, C3=JP clone
+- `BDopdemo.sfd`: C1=JP, C2=KR, C3=KR clone
 
-- The **[ReXGlue SDK](https://github.com/rexglue/rexglue-sdk)** team, for the toolchain this project is built on.
+Dropping the synthesized C3 stream from the converted file reproduces the
+original Korean C1/C2/E0 packet-body sequence exactly.
 
-- The **[hedge-dev](https://github.com/hedge-dev)** team, for [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) and for blazing the trail for Xbox 360 recompilations with [Unleashed Recompiled](https://github.com/hedge-dev/UnleashedRecomp).
+The conversion logic has been dry-run against all three Korean retail disc
+data sets. It identifies the same **69 unique regional movies** used by the
+known-good Korean voice build; single-audio and silent SFDs are left unchanged.
 
-- The wider **Xbox 360 emulation scene**, and the [Xenia](https://github.com/xenia-project/xenia) project in particular. A lot of the hardest problems were solved long before this project started.
+## Korean data preparation tool
 
-## License
+The current preview tool works on a `game` folder already extracted from your
+own Korean retail discs:
 
-See [LICENSE](LICENSE).
+```powershell
+python tools\prepare_korean_data.py D:\BlueDragonKR\game
+```
+
+That command is a **dry run** and changes nothing. After reviewing the list:
+
+```powershell
+python tools\prepare_korean_data.py D:\BlueDragonKR\game --apply
+```
+
+The final goal is to integrate this step into the normal re:Blue disc installer
+so Korean Disc 1/2/3 can be selected directly for the regional-data import.
+
+See [docs/KOREAN_RETAIL.md](docs/KOREAN_RETAIL.md) for details.
+
+## Status
+
+This is a development preview, not an official re:Blue release. The generic
+Android wrapper now builds as `com.reblue.android` and defaults to normal
+NTSC-U / English data. A prepared Korean-data install is detected
+automatically instead of being required by the APK.
+
+The current preview has passed Java/Gradle compilation, native ARM64 linking,
+APK assembly and APK-signature/package validation. Physical-device runtime QA
+is still required before treating it as a general public release. Android
+compatibility may vary by Vulkan driver/GPU.
+
+See [android/README.md](android/README.md) and
+[docs/ANDROID_BUILD.md](docs/ANDROID_BUILD.md) for build details.
+
+## Upstream and license
+
+The re:Blue source is BSD-3-Clause licensed. Keep the upstream copyright and
+license notices when redistributing modified source or binaries.
+
+- Upstream: https://github.com/zolaware/reblue
+- ReXGlue SDK: https://github.com/rexglue/rexglue-sdk
+
+Blue Dragon and all retail game assets remain property of their respective
+rights holders and are not included in this project.

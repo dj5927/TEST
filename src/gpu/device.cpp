@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -34,6 +35,7 @@
 #include "gpu/gpu_profiling.h"
 
 #include "core/logging.h"
+#include "core/android_diag.h"
 #include "core/memory_helpers.h"
 #include "core/settings.h"
 #include "core/shutdown.h"
@@ -76,14 +78,51 @@ plume::RenderColor ArgbToRenderColor(u32 argb) {
 }
 
 bool BuildFramebuffers(VideoState &s) {
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(200);
+  u64 swap_vptr = 0;
+  if (s.swap_chain)
+    std::memcpy(&swap_vptr, s.swap_chain.get(), sizeof(swap_vptr));
+  u64 device_vptr = 0;
+  if (s.device)
+    std::memcpy(&device_vptr, s.device.get(), sizeof(device_vptr));
+  bd::AndroidDiag(std::format(
+      "v029 stage=BuildFramebuffers_enter swap={:#018x} swap_vptr={:#018x} device={:#018x} device_vptr={:#018x}",
+      reinterpret_cast<u64>(s.swap_chain.get()), swap_vptr,
+      reinterpret_cast<u64>(s.device.get()), device_vptr));
+  bd::AndroidCrashStage(201);
+  bd::AndroidDiag("v030 stage=before_getTextureCount_framebuffers");
+#endif
   s.framebuffers.clear();
   const u32 count = s.swap_chain->getTextureCount();
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(202);
+  bd::AndroidDiag(std::format("v029 stage=after_getTextureCount_framebuffers count={}", count));
+#endif
   s.framebuffers.reserve(count);
   for (u32 i = 0; i < count; ++i) {
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(210 + static_cast<int>(i));
+    bd::AndroidDiag(std::format("v029 stage=before_getTexture index={}", i));
+#endif
     plume::RenderTexture *tex = s.swap_chain->getTexture(i);
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(220 + static_cast<int>(i));
+    bd::AndroidDiag(std::format("v029 stage=after_getTexture index={} tex={:#018x}",
+                                i, reinterpret_cast<u64>(tex)));
+#endif
     const plume::RenderTexture *color_attachments[1] = {tex};
     plume::RenderFramebufferDesc desc(color_attachments, 1);
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(230 + static_cast<int>(i));
+    bd::AndroidDiag(std::format("v029 stage=before_createFramebuffer index={}", i));
+#endif
     auto fb = s.device->createFramebuffer(desc);
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(240 + static_cast<int>(i));
+    bd::AndroidDiag(std::format("v029 stage=after_createFramebuffer index={} fb={:#018x}",
+                                i, reinterpret_cast<u64>(fb.get())));
+#endif
     if (!fb) {
       BD_ERROR("Plume createFramebuffer failed for back buffer {}", i);
       s.framebuffers.clear(); // never leave a partial set, Present's empty()
@@ -92,6 +131,10 @@ bool BuildFramebuffers(VideoState &s) {
     }
     s.framebuffers.push_back(std::move(fb));
   }
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(250);
+  bd::AndroidDiag(std::format("v029 stage=BuildFramebuffers_complete count={}", count));
+#endif
   return true;
 }
 
@@ -99,11 +142,30 @@ bool BuildFramebuffers(VideoState &s) {
 // surface's negotiated image count. See render_semaphores for why this is not
 // sized to kNumFrames.
 bool BuildPresentSemaphores(VideoState &s) {
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(300);
+  bd::AndroidDiag("v029 stage=BuildPresentSemaphores_enter");
+  bd::AndroidCrashStage(301);
+  bd::AndroidDiag("v030 stage=before_getTextureCount_semaphores");
+#endif
   s.render_semaphores.clear();
   const u32 count = s.swap_chain->getTextureCount();
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(302);
+  bd::AndroidDiag(std::format("v029 stage=after_getTextureCount_semaphores count={}", count));
+#endif
   s.render_semaphores.reserve(count);
   for (u32 i = 0; i < count; ++i) {
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(310 + static_cast<int>(i));
+    bd::AndroidDiag(std::format("v029 stage=before_createCommandSemaphore index={}", i));
+#endif
     auto sem = s.device->createCommandSemaphore();
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(320 + static_cast<int>(i));
+    bd::AndroidDiag(std::format("v029 stage=after_createCommandSemaphore index={} sem={:#018x}",
+                                i, reinterpret_cast<u64>(sem.get())));
+#endif
     if (!sem) {
       BD_ERROR("Plume createCommandSemaphore failed for present semaphore {}",
                i);
@@ -112,6 +174,10 @@ bool BuildPresentSemaphores(VideoState &s) {
     }
     s.render_semaphores.push_back(std::move(sem));
   }
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(330);
+  bd::AndroidDiag(std::format("v029 stage=BuildPresentSemaphores_complete count={}", count));
+#endif
   return true;
 }
 
@@ -345,6 +411,17 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
       BD_ERROR("Plume RenderInterface::createDevice failed");
       return false;
     }
+#if defined(__ANDROID__)
+    {
+      const auto &required_caps = s.device->getCapabilities();
+      bd::AndroidDiag(std::format(
+          "TRACE V42 Vulkan caps shaderInt64={} bufferDeviceAddress={} scalarBlockLayout={} descriptorIndexing={}",
+          required_caps.shaderInt64, required_caps.bufferDeviceAddress,
+          required_caps.scalarBlockLayout, required_caps.descriptorIndexing));
+      if (!required_caps.shaderInt64 || !required_caps.bufferDeviceAddress)
+        bd::AndroidDiag("TRACE V42 selecting BDA-free UBO constant fallback");
+    }
+#endif
     s.backend_info = DescribeBackend(s.device.get());
     // bd_msaa is clamped to the color/depth intersection. Everything
     // shader-resolves, so no hardware resolve capability is needed.
@@ -399,45 +476,111 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
                                     plume::RenderFormat::B8G8R8A8_UNORM,
                                     kNumFrames + 1, false, kNumFrames);
     s.swap_chain = s.queue->createSwapChain(desc);
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(90);
+    u64 swap_vptr_before = 0;
+    if (s.swap_chain)
+      std::memcpy(&swap_vptr_before, s.swap_chain.get(), sizeof(swap_vptr_before));
+    bd::AndroidDiag(std::format(
+        "v029 stage=swapchain_created swap={:#018x} vptr={:#018x}",
+        reinterpret_cast<u64>(s.swap_chain.get()), swap_vptr_before));
+#endif
 #if !defined(REBLUE_D3D12)
     // plume's VulkanSwapChain defers VkSwapchain creation to resize(), so a
     // fresh swapchain is always empty until the first resize. The D3D12 backend
     // creates its swapchain in the constructor, so this stays Vulkan-only.
     if (s.swap_chain) {
+#if defined(__ANDROID__)
+      bd::AndroidCrashStage(100);
+      bd::AndroidDiag("v029 stage=before_resize");
+      const bool resize_ok = s.swap_chain->resize();
+      bd::AndroidCrashStage(140);
+      u64 swap_vptr_after = 0;
+      std::memcpy(&swap_vptr_after, s.swap_chain.get(), sizeof(swap_vptr_after));
+      bd::AndroidDiag(std::format(
+          "v029 stage=after_resize ok={} swap={:#018x} vptr={:#018x}",
+          resize_ok, reinterpret_cast<u64>(s.swap_chain.get()), swap_vptr_after));
+      if (!resize_ok) {
+        BD_ERROR("Plume swapChain resize failed");
+        return false;
+      }
+#else
       s.swap_chain->resize();
+#endif
     }
 #endif
+#if defined(__ANDROID__)
+    // V027 crashed immediately after resize with PC/LR 0x...0001 (BUS_ADRALN).
+    // Bypass this one virtual dispatch in V029 to prove whether isEmpty() is
+    // the corrupt indirect call. The resize success above is the validity gate.
+    bd::AndroidCrashStage(150);
+    bd::AndroidDiag("v030 stage=isEmpty_virtual_call_BYPASSED");
+    if (!s.swap_chain) {
+      BD_ERROR("Plume createSwapChain failed");
+      return false;
+    }
+#else
     if (!s.swap_chain || s.swap_chain->isEmpty()) {
       BD_ERROR("Plume createSwapChain failed");
       return false;
     }
+#endif
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(200);
+    bd::AndroidDiag("v030 stage=before_BuildFramebuffers");
+#endif
     if (!BuildFramebuffers(s)) {
       return false;
     }
+#if defined(__ANDROID__)
+    bd::AndroidDiag("v029 stage=after_BuildFramebuffers");
+    bd::AndroidDiag("v029 stage=before_BuildPresentSemaphores");
+#endif
     if (!BuildPresentSemaphores(s)) {
       return false;
     }
 #if defined(__ANDROID__)
-    BD_INFO("[android-diag] swapchain ready {}x{} images={} backend={} gpu='{}'",
-            s.swap_chain->getWidth(), s.swap_chain->getHeight(),
-            s.swap_chain->getTextureCount(), s.backend_info,
-            s.device->getDescription().name);
+    bd::AndroidCrashStage(400);
+    bd::AndroidDiag("v030 stage=after_BuildPresentSemaphores");
+#endif
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(401);
 #endif
     if (!BuildPipelineLayout(s)) {
       return false;
     }
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(499);
+    bd::AndroidCrashStage(500);
+#endif
     if (!BuildCopyPipeline(s)) {
       return false;
     }
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(599);
+    bd::AndroidCrashStage(600);
+#endif
     // overlay drawer uploads textures through this
     if (!TryInit()) {
       BD_ERROR("TryInit failed, shader constants disabled");
     }
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(601);
+#endif
   }
 
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(700);
+#endif
   if (!rex::Runtime::instance()) {
+#if defined(__ANDROID__)
+    bd::AndroidCrashStage(701);
+#endif
     return true; // guest tail waits for the post-Runtime call
   }
+#if defined(__ANDROID__)
+  bd::AndroidCrashStage(800);
+#endif
 
   // Must precede any HostResourceHeap::Alloc.
   if (!bd::gpu::HostHeap::Get().Init()) {
@@ -464,15 +607,19 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
 
     // Inline SRV register (BindTextureSRV would re-take the held s.mutex) so
     // the per-Present blit can sample this back buffer.
-    const u32 slot = AllocateSlot(s);
-    if (slot == kInvalidDescriptorIndex) {
-      BD_ERROR("Back-buffer SRV bind failed: bindless heap full");
-      return false;
+    if (s.descriptor_compat_mode) {
+      bb->descriptorIndex = 0; // live-SRV marker; draw-local slot is used
+    } else {
+      const u32 slot = AllocateSlot(s);
+      if (slot == kInvalidDescriptorIndex) {
+        BD_ERROR("Back-buffer SRV bind failed: bindless heap full");
+        return false;
+      }
+      s.texture_descriptor_set->setTexture(
+          slot, bb->texture, plume::RenderTextureLayout::SHADER_READ,
+          bb->textureView.get());
+      bb->descriptorIndex = slot;
     }
-    s.texture_descriptor_set->setTexture(
-        slot, bb->texture, plume::RenderTextureLayout::SHADER_READ,
-        bb->textureView.get());
-    bb->descriptorIndex = slot;
 
     s.back_buffer_surface = bb;
   }
@@ -617,17 +764,21 @@ GuestTexture *GetOrCreateDebugTexture() {
   view_desc.mipLevels = 1;
   t->textureView = t->texture->createTextureView(view_desc);
 
-  const u32 slot = AllocateSlot(s);
-  if (slot == kInvalidDescriptorIndex) {
-    BD_ERROR("GetOrCreateDebugTexture: bindless heap full, fallback texture "
-             "dropped");
-    delete t;
-    return nullptr;
+  if (s.descriptor_compat_mode) {
+    t->descriptorIndex = 0;
+  } else {
+    const u32 slot = AllocateSlot(s);
+    if (slot == kInvalidDescriptorIndex) {
+      BD_ERROR("GetOrCreateDebugTexture: bindless heap full, fallback texture "
+               "dropped");
+      delete t;
+      return nullptr;
+    }
+    s.texture_descriptor_set->setTexture(
+        slot, t->texture, plume::RenderTextureLayout::SHADER_READ,
+        t->textureView.get());
+    t->descriptorIndex = slot;
   }
-  s.texture_descriptor_set->setTexture(slot, t->texture,
-                                       plume::RenderTextureLayout::SHADER_READ,
-                                       t->textureView.get());
-  t->descriptorIndex = slot;
 
   plume::RenderTextureBarrier to_rt(t->texture,
                                     plume::RenderTextureLayout::COLOR_WRITE);

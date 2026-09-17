@@ -236,7 +236,14 @@ void RecordPresentPass(VideoState &s, GuestTexture *rt, GuestTexture *chosen,
 
   const u32 swap_w = s.swap_chain->getWidth();
   const u32 swap_h = s.swap_chain->getHeight();
-  const u32 gamma_src_desc = rt->descriptorIndex;
+  u32 gamma_src_desc = rt->descriptorIndex;
+  if (s.descriptor_compat_mode) {
+    if (!BindCompatHostTextureLocked(s, rt, s.default_sampler.get())) {
+      BD_ERROR("Present: failed to bind compatibility source descriptor");
+      return;
+    }
+    gamma_src_desc = 0;
+  }
 
   s.command_list->barriers(plume::RenderBarrierStage::GRAPHICS,
                            plume::RenderTextureBarrier(
@@ -445,6 +452,11 @@ void Video::PresentDiagnosticColor() {
 
 void Video::Present(GuestTexture *frontBuffer) {
   auto &s = state();
+#if defined(__ANDROID__)
+  static std::atomic<bool> s_first_present_trace{false};
+  if (!s_first_present_trace.exchange(true, std::memory_order_acq_rel))
+    bd::AndroidDiag("TRACE guest first Video::Present ENTER");
+#endif
   // Before the lock: shutdown runs on the UI thread, so a Present that reached
   // the overlay hook would marshal into a thread no longer pumping, holding
   // s.mutex while it waits.
@@ -623,6 +635,9 @@ void Video::Present(GuestTexture *frontBuffer) {
     // call is the one that reports the loss.
     const bool present_ok = s.swap_chain->present(texture_index, signals, 1);
 #if defined(__ANDROID__)
+    if (android_present_n == 0)
+      bd::AndroidDiag(std::format(
+          "TRACE guest first swapchain present result={}", present_ok));
     if (android_diag_log) {
       bd::AndroidDiag(std::format("present #{} queue result={}",
                                   android_present_n, present_ok));

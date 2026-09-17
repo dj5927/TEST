@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -224,7 +225,7 @@ void ApplyReblueCvarDefaults() {
       {"bd_opt_msg_speed", "3"},
       {"bd_opt_msg_size", "1"},
       {"bd_update_check", "false"},
-      {"bd_fps_limit", "0"},
+      {"bd_fps_limit", "60"},
   };
   for (const auto &[name, value] : kAndroidDefaults)
     if (!SetCvarDefault(name, value))
@@ -312,33 +313,7 @@ ReblueApp::~ReblueApp() = default;
 // below it is always the first thing in the log.
 void ReblueApp::OnPostInitLogging() {
 #if defined(__ANDROID__)
-  // Match the known-good Korean PC profile on first V024 boot. This is a
-  // one-time migration only; after the marker exists, user language/voice
-  // changes are left alone.
-  {
-    const std::filesystem::path cfg = bd::platform::ConfigFilePath();
-    const std::filesystem::path marker =
-        cfg.parent_path() / ".android_kr_defaults_v024";
-    std::error_code ec;
-    if (!std::filesystem::exists(marker, ec)) {
-      bool ok = true;
-      ok = rex::cvar::SetFlagByName("user_language", "7", true) && ok;
-      ok = rex::cvar::SetFlagByName("bd_language", "kr", true) && ok;
-      ok = rex::cvar::SetFlagByName("bd_opt_voice_type", "2", true) && ok;
-      if (ok) {
-        rex::cvar::SaveConfig(cfg);
-        std::ofstream out(marker, std::ios::trunc);
-        if (out)
-          out << "24\n";
-        bd::AndroidDiag(
-            "v024 Korean defaults migrated: user_language=7 bd_language=kr "
-            "bd_opt_voice_type=2");
-      } else {
-        BD_WARN("Android Korean-default migration could not set all cvars");
-      }
-    }
-  }
-
+  bd::AndroidDiag("TRACE native OnPostInitLogging ENTER");
   {
     const std::filesystem::path cfg = bd::platform::ConfigFilePath();
     const std::filesystem::path marker =
@@ -350,7 +325,7 @@ void ReblueApp::OnPostInitLogging() {
       ok = rex::cvar::SetFlagByName("bd_opt_msg_speed", "3", true) && ok;
       ok = rex::cvar::SetFlagByName("bd_opt_msg_size", "1", true) && ok;
       ok = rex::cvar::SetFlagByName("bd_update_check", "false", true) && ok;
-      ok = rex::cvar::SetFlagByName("bd_fps_limit", "0", true) && ok;
+      ok = rex::cvar::SetFlagByName("bd_fps_limit", "60", true) && ok;
       if (ok) {
         rex::cvar::SaveConfig(cfg);
         std::ofstream out(marker, std::ios::trunc);
@@ -358,10 +333,40 @@ void ReblueApp::OnPostInitLogging() {
           out << "25\n";
         bd::AndroidDiag(
             "v025 gameplay defaults migrated: audio_hints=0 msg_speed=3 "
-            "msg_size=1 update_check=false fps_limit=0");
+            "msg_size=1 update_check=false fps_limit=60");
       } else {
         BD_WARN("Android V025 gameplay-default migration failed");
       }
+    }
+  }
+
+  // Older Android builds persisted unlimited FPS (0). Migrate that legacy
+  // default once while preserving any explicit non-zero cap the user chose.
+  {
+    const std::filesystem::path cfg = bd::platform::ConfigFilePath();
+    const std::filesystem::path marker =
+        cfg.parent_path() / ".android_fps_default_v042";
+    std::error_code ec;
+    if (!std::filesystem::exists(marker, ec)) {
+      bool legacy_unlimited = false;
+      std::ifstream in(cfg);
+      if (in) {
+        const std::string text((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        legacy_unlimited =
+            text.find("bd_fps_limit = 0") != std::string::npos;
+      }
+      if (legacy_unlimited) {
+        if (rex::cvar::SetFlagByName("bd_fps_limit", "60", true)) {
+          rex::cvar::SaveConfig(cfg);
+          bd::AndroidDiag("V42 migrated legacy fps_limit=0 to 60");
+        } else {
+          BD_WARN("Android V42 FPS migration could not set bd_fps_limit");
+        }
+      }
+      std::ofstream out(marker, std::ios::trunc);
+      if (out)
+        out << "42\n";
     }
   }
 #endif
@@ -407,9 +412,15 @@ void ReblueApp::OnPostInitLogging() {
   BD_INFO("  built:   " REBLUE_BUILD_TIMESTAMP " with " REBLUE_BUILD_COMPILER);
   BD_INFO("  sdk:     rexglue-v" REXGLUE_VERSION_STRING
           " " REXGLUE_BUILD_PLATFORM " @" REXGLUE_BUILD_TIMESTAMP);
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native OnPostInitLogging EXIT");
+#endif
 }
 
 void ReblueApp::OnPreSetup(rex::RuntimeConfig &config) {
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native OnPreSetup ENTER");
+#endif
   if (bd::Settings::Get().Profiler()) {
     rex::perf::Profiler::Startup();
     if (rex::perf::Profiler::is_enabled())
@@ -516,6 +527,9 @@ void ReblueApp::OnPreSetup(rex::RuntimeConfig &config) {
     }
     return input;
   };
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native OnPreSetup EXIT");
+#endif
 }
 
 void ReblueApp::OnConfigureFonts(ImFontAtlas *atlas) {
@@ -752,8 +766,8 @@ void ReblueApp::OnConfigureLogging(rex::LogConfig &config) {
 #if defined(__ANDROID__)
   if (const char *android_game_root = std::getenv("REBLUE_GAME_DATA_ROOT");
       android_game_root && *android_game_root) {
-    const auto external_log_dir =
-        std::filesystem::path(android_game_root).parent_path() / "android_logs";
+    const auto external_log_dir = std::filesystem::path(android_game_root) /
+                                  "android_diag" / "logs";
     std::error_code ec;
     std::filesystem::create_directories(external_log_dir, ec);
     if (!ec) {
@@ -843,8 +857,8 @@ ReblueApp::OnFinalizePaths(const rex::PathConfig &defaults,
   rex::PathConfig paths = defaults;
   if (!std::filesystem::exists(paths.game_data_root / "default.xex")) {
     bd::platform::ShowFatalError(
-        "Blue Dragon KR - game data missing",
-        "Copy the prepared Blue Dragon KR game folder to:\n" +
+        "re:Blue Android - game data missing",
+        "Choose or copy a prepared re:Blue game folder to:\n" +
             paths.game_data_root.string() +
             "\n\nThe folder must contain default.xex.");
     app_context().QuitFromUIThread();
@@ -965,12 +979,28 @@ ReblueApp::OnFinalizePaths(const rex::PathConfig &defaults,
 }
 
 bool ReblueApp::BeginPreGuestUI() {
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native BeginPreGuestUI ENTER");
+#endif
   if (!bd::gpu::Video::CreateHostDevice(window())) {
+#if defined(__ANDROID__)
+    bd::AndroidDiag(fmt::format(
+        "TRACE native BeginPreGuestUI renderer FAILED stage={}",
+        bd::AndroidCrashStageGet()));
+    bd::platform::ShowFatalError(
+        "reblue V42 Renderer Init Failed",
+        fmt::format("Renderer initialization failed.\n\nstage={}",
+                    bd::AndroidCrashStageGet()));
+#else
     bd::platform::ShowFatalError("reblue - renderer init failed",
                                  "Failed to initialize the renderer.");
+#endif
     app_context().QuitFromUIThread();
     return false;
   }
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native BeginPreGuestUI renderer SUCCESS");
+#endif
   InstallOverlayDrawHook();
   app_context().CallInUIThreadDeferred([] {
     ApplyWindowSizeConstraints();
@@ -1130,7 +1160,13 @@ void ReblueApp::FinishInstaller(rex::PathConfig defaults,
 #endif // REBLUE_BUILD_INSTALLER
 
 void ReblueApp::OnPreLaunchModule() {
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native OnPreLaunchModule ENTER");
+#endif
   bd::platform::InstallCrashHandler();
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native crash handler INSTALLED");
+#endif
   bd::EnableHighResTimer();
 
   // BD reads XCONFIG_USER_LANGUAGE once at boot, which the SDK serves from the
@@ -1163,6 +1199,10 @@ void ReblueApp::OnPreLaunchModule() {
   }
 
   auto *rt = rex::Runtime::instance();
+#if defined(__ANDROID__)
+  bd::AndroidDiag(fmt::format("TRACE native Runtime instance={}",
+                              static_cast<void *>(rt)));
+#endif
   const auto profile_root = rt->user_data_root();
   BD_INFO("[profile] active '{}' (user data: {})", active_profile_,
           profile_root.string());
@@ -1170,19 +1210,15 @@ void ReblueApp::OnPreLaunchModule() {
   bd::vfs::VFS::Get().Init(rt->game_data_root(), rt->cache_root());
   bd::vfs::VFS::Get().SetProfile(profile_root);
 #if defined(__ANDROID__)
-  // The Android package uses the US executable with the Korean/Asian text
-  // overlay staged next to game/ as mods/bd_asia_text. A fresh Android
-  // profile has no mod_order.txt, so explicitly enable the required overlay
-  // when it is present instead of making the user manage a hidden profile
-  // file under Android/data.
+  // Korean/Asian text is an optional overlay on top of the NTSC-U static
+  // recompilation. A fresh Android profile has no mod_order.txt, so enable the
+  // overlay automatically when a prepared regional-data install provides it.
+  // Normal NTSC-U / English installs simply do not have this directory.
   const auto asia_text_mod =
       rt->game_data_root().parent_path() / "mods" / "bd_asia_text";
   if (std::filesystem::is_directory(asia_text_mod)) {
     bd::vfs::VFS::Get().Mods().Enable("bd_asia_text");
-    BD_INFO("[android] enabled required KR text mod at {}",
-            asia_text_mod.string());
-  } else {
-    BD_WARN("[android] required KR text mod missing at {}",
+    BD_INFO("[android] enabled optional Asia text mod at {}",
             asia_text_mod.string());
   }
 #endif
@@ -1205,16 +1241,34 @@ void ReblueApp::OnPreLaunchModule() {
   // that the guest does not route through its single "download" IPK slot.
   bd::vfs::VFS::Get().DLC().MountArchives();
 
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native before CreateHostDevice guest-tail");
+#endif
   if (!bd::gpu::Video::CreateHostDevice(window())) {
     BD_ERROR("Native renderer init failed, reblue cannot continue");
+#if defined(__ANDROID__)
+    bd::AndroidDiag(fmt::format(
+        "TRACE native CreateHostDevice guest-tail FAILED stage={}",
+        bd::AndroidCrashStageGet()));
+    bd::platform::ShowFatalError(
+        "reblue V42 Renderer Init Failed",
+        fmt::format("Renderer guest-tail initialization failed.\n\nstage={}",
+                    bd::AndroidCrashStageGet()));
+#endif
     app_context().QuitFromUIThread();
     return;
   }
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native CreateHostDevice guest-tail SUCCESS");
+#endif
   InstallOverlayDrawHook();
   app_context().CallInUIThreadDeferred([] {
     ApplyWindowSizeConstraints();
     RaiseMainWindow();
   });
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE native OnPreLaunchModule EXIT");
+#endif
 }
 
 // Present runs on the guest thread and ImGui on the UI thread, so this marshals

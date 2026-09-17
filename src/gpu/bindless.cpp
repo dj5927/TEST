@@ -62,6 +62,10 @@ void DrainDescriptorSlotsLocked(VideoState &s, u32 slot) {
 void ReleaseTextureSRVLocked(VideoState &s, GuestTexture *tex) {
   if (!tex || tex->descriptorIndex == kInvalidDescriptorIndex)
     return;
+  if (s.descriptor_compat_mode) {
+    tex->descriptorIndex = kInvalidDescriptorIndex;
+    return;
+  }
   const u32 slot = tex->descriptorIndex;
   tex->descriptorIndex = kInvalidDescriptorIndex;
   u32 null_index = kNullTexture2DDescriptorIndex;
@@ -79,7 +83,7 @@ void ReleaseTextureSRVLocked(VideoState &s, GuestTexture *tex) {
 }
 
 u32 BindTextureSRVLocked(VideoState &s, GuestTexture *tex) {
-  if (!tex || !tex->texture || !s.texture_descriptor_set) {
+  if (!tex || !tex->texture) {
     return kInvalidDescriptorIndex;
   }
   if (tex->descriptorIndex != kInvalidDescriptorIndex) {
@@ -102,6 +106,14 @@ u32 BindTextureSRVLocked(VideoState &s, GuestTexture *tex) {
   if (!tex->textureView) {
     return kInvalidDescriptorIndex;
   }
+  if (s.descriptor_compat_mode) {
+    // In fixed-array mode this is only a live-SRV marker. The real descriptor
+    // index is the X360 draw-local slot (0..15) captured per draw.
+    tex->descriptorIndex = 0;
+    return 0;
+  }
+  if (!s.texture_descriptor_set)
+    return kInvalidDescriptorIndex;
   const u32 slot = AllocateSlot(s);
   if (slot == kInvalidDescriptorIndex) {
     BD_ERROR("Bindless texture heap full at {} slots, SRV bind dropped",
@@ -116,6 +128,8 @@ u32 BindTextureSRVLocked(VideoState &s, GuestTexture *tex) {
 }
 
 u32 Video::AllocateBindlessTextureSlot() {
+  if (state().descriptor_compat_mode)
+    return 0;
   // AllocateSlot's kInvalidDescriptorIndex is the sentinel callers expect, so
   // no remap is needed.
   return AllocateSlot(state());
@@ -124,6 +138,8 @@ u32 Video::AllocateBindlessTextureSlot() {
 void Video::FreeBindlessTextureSlot(u32 slot) {
   auto &s = state();
   std::lock_guard lock(s.mutex);
+  if (s.descriptor_compat_mode)
+    return;
   ParkDescriptorSlotLocked(s, slot, kNullTexture2DDescriptorIndex);
 }
 

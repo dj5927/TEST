@@ -1,7 +1,11 @@
 #pragma once
 #include "copy_common.hlsli"
 
+#if defined(REBLUE_DESCRIPTOR_COMPAT)
+Texture2DMS<float, SAMPLE_COUNT> g_Texture2DMSDescriptorHeap[9] : register(t0, space0);
+#else
 Texture2DMS<float, SAMPLE_COUNT> g_Texture2DMSDescriptorHeap[] : register(t0, space0);
+#endif
 
 float main(in float4 position : SV_Position, in float2 texCoord : TEXCOORD) : SV_Depth
 {

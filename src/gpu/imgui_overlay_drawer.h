@@ -51,6 +51,8 @@ public:
 
   u32 tex_slot() const { return tex_slot_; }
   u32 sampler_slot() const { return sampler_slot_; }
+  plume::RenderTexture *texture() const { return texture_.get(); }
+  plume::RenderTextureView *view() const { return view_.get(); }
 
 private:
   u32 tex_slot_;

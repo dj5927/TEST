@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -25,6 +26,7 @@
 #include "gpu/hooks/tweaks.h"
 #include "gpu/sampler_cache.h"
 #include "gpu/settings.h"
+#include "gpu/shaders/android_compat_slots.h"
 #include "gpu/shaders/shader_cache.h"
 
 namespace bd::gpu {
@@ -54,6 +56,9 @@ struct FrameUpload {
   u32 chunkIndex = 0;
   u32 chunkOffset = 0;
   u32 peakChunkCount = 0;
+  ConstantAllocation cachedVS{};
+  ConstantAllocation cachedPS{};
+  ConstantAllocation cachedShared{};
 };
 
 // DecodeFromFetch + ResolveSlotLocked (mutex + hash lookup) run per bound slot
@@ -104,13 +109,15 @@ bool CreateChunk(UploadChunk &chunk) {
   auto *device = bd::gpu::Video::HostDevice();
   if (!device)
     return false;
+  auto flags = plume::RenderBufferFlag::CONSTANT |
+               plume::RenderBufferFlag::VERTEX |
+               plume::RenderBufferFlag::INDEX;
+  const bool needs_device_address = !bd::gpu::state().descriptor_ubo_mode;
+  if (needs_device_address)
+    flags = flags | plume::RenderBufferFlag::DEVICE_ADDRESSABLE;
   chunk.buffer = bd::gpu::CreateHostBuffer(
       device,
-      plume::RenderBufferDesc::UploadBuffer(
-          kUploadChunkSize, plume::RenderBufferFlag::CONSTANT |
-                                plume::RenderBufferFlag::VERTEX |
-                                plume::RenderBufferFlag::INDEX |
-                                plume::RenderBufferFlag::DEVICE_ADDRESSABLE),
+      plume::RenderBufferDesc::UploadBuffer(kUploadChunkSize, flags),
       "cb-upload-chunk");
   if (!chunk.buffer) {
     BD_ERROR("constant_buffers: createBuffer({} MiB chunk) failed",
@@ -123,7 +130,7 @@ bool CreateChunk(UploadChunk &chunk) {
     chunk.buffer.reset();
     return false;
   }
-  chunk.gpuBase = chunk.buffer->getDeviceAddress();
+  chunk.gpuBase = needs_device_address ? chunk.buffer->getDeviceAddress() : 0;
   return true;
 }
 
@@ -232,6 +239,9 @@ void ResetFrame(u32 slot) {
   FrameUpload &up = s.frames[slot];
   up.chunkIndex = 0;
   up.chunkOffset = 0;
+  up.cachedVS = {};
+  up.cachedPS = {};
+  up.cachedShared = {};
   RecomputeShadowPcfScale(s);
 }
 
@@ -258,25 +268,34 @@ void PinScreenUVScaleReg(u8 *block) {
   }
 }
 
-ConstantAllocation UploadVertexShaderConstants(u32 device_guest) {
+ConstantAllocation UploadVertexShaderConstants(u32 device_guest,
+                                               bool force_upload) {
   BD_CPU_ZONE("UploadVSConstants");
   auto &s = upload_state();
   if (!device_guest)
     return {};
+  FrameUpload &up = s.frames[s.cursor];
+  if (!force_upload && up.cachedVS.size)
+    return up.cachedVS;
   auto alloc = Allocate(s, kConstantBlockBytes, kCBVAlignment);
   if (!alloc.memory)
     return {};
   CopyByteSwap32FlushNaN(alloc.memory,
                          device_guest + offsetof(D3DDevice, vsFloatConstants),
                          kConstantBlockBytes);
+  up.cachedVS = alloc;
   return alloc;
 }
 
-ConstantAllocation UploadPixelShaderConstants(u32 device_guest) {
+ConstantAllocation UploadPixelShaderConstants(u32 device_guest,
+                                              bool force_upload) {
   BD_CPU_ZONE("UploadPSConstants");
   auto &s = upload_state();
   if (!device_guest)
     return {};
+  FrameUpload &up = s.frames[s.cursor];
+  if (!force_upload && up.cachedPS.size)
+    return up.cachedPS;
   auto alloc = Allocate(s, kConstantBlockBytes, kCBVAlignment);
   if (!alloc.memory)
     return {};
@@ -284,10 +303,13 @@ ConstantAllocation UploadPixelShaderConstants(u32 device_guest) {
                          device_guest + offsetof(D3DDevice, psFloatConstants),
                          kConstantBlockBytes);
   PinScreenUVScaleReg(alloc.memory);
+  up.cachedPS = alloc;
   return alloc;
 }
 
-ConstantAllocation UploadSharedConstants(u32 device_guest) {
+ConstantAllocation UploadSharedConstants(u32 device_guest,
+                                         const ConstantAllocation *vs_alloc,
+                                         const ConstantAllocation *ps_alloc) {
   BD_CPU_ZONE("UploadSharedConstants");
   auto &s = upload_state();
   if (!s.ready)
@@ -304,11 +326,108 @@ ConstantAllocation UploadSharedConstants(u32 device_guest) {
   // last real texture per slot, exactly what the GPU would still be sampling.
   auto &vs = bd::gpu::state();
   const auto *device_p = bd::mem::at<const D3DDevice>(device_guest);
+  CompatDescriptorBundle *compat_bundle = nullptr;
+  u32 compat_2d[16]{};
+  u32 compat_3d[16]{};
+  u32 compat_cube[16]{};
+  u32 compat_sampler[16]{};
+  u16 compat_2d_mask = 0;
+  u16 compat_3d_mask = 0;
+  u16 compat_cube_mask = 0;
+  u16 compat_sampler_mask = 0;
+  if (vs.descriptor_compat_mode) {
+    compat_bundle = AllocateCompatDescriptorBundleLocked(vs);
+    if (!compat_bundle) {
+      BD_ERROR("descriptor compat: failed to allocate per-draw descriptor bundle");
+      return {};
+    }
+
+    const GuestShader *ps = vs.pipelineState.pixelShader
+                                ? vs.pipelineState.pixelShader
+                                : vs.pixel_shader;
+    const u64 ps_hash =
+        (ps && ps->shaderCacheEntry) ? ps->shaderCacheEntry->hash : 0;
+    const AndroidCompatSlotMask *mask = FindAndroidCompatSlotMask(ps_hash);
+    AndroidCompatSlotMask host_fallback{};
+    if (!mask && ps && !ps->shaderCacheEntry) {
+      // hcgPixelShaderCreateByHlsl creates the host 2D blit shader without a
+      // guest cache entry. It only reads Tex0 and sampler0.
+      host_fallback = {0, 0x0001, 0, 0, 0x0001};
+      mask = &host_fallback;
+    }
+    if (!mask) {
+      static u64 last_missing_hash = ~0ull;
+      if (last_missing_hash != ps_hash) {
+        last_missing_hash = ps_hash;
+        BD_ERROR("descriptor compat: no slot mask for pixel shader 0x{:016X}",
+                 ps_hash);
+      }
+      return {};
+    }
+
+    compat_2d_mask = mask->texture2D;
+    compat_3d_mask = mask->texture3D;
+    compat_cube_mask = mask->textureCube;
+    compat_sampler_mask = mask->samplers;
+    const auto dense = [](u16 bits, u32 capacity, u32 (&map)[16]) {
+      u32 next = 0;
+      for (u32 slot = 0; slot < 16; ++slot) {
+        if ((bits & (u16(1) << slot)) != 0)
+          map[slot] = next++;
+      }
+      return next <= capacity;
+    };
+    if (!dense(compat_2d_mask, kAndroidCompatTexture2DCapacity, compat_2d) ||
+        !dense(compat_3d_mask, kAndroidCompatTexture3DCapacity, compat_3d) ||
+        !dense(compat_cube_mask, kAndroidCompatTextureCubeCapacity,
+               compat_cube) ||
+        !dense(compat_sampler_mask, kAndroidCompatSamplerCapacity,
+               compat_sampler)) {
+      BD_ERROR("descriptor compat: compact capacity exceeded for PS "
+               "0x{:016X}",
+               ps_hash);
+      return {};
+    }
+
+    // Recycled fixed descriptor arrays stay fully valid from their initial
+    // fill. Reset only the dense entries this shader may actually access; the
+    // resource walk below then overwrites entries backed by real resources.
+    for (u32 i = 0; i < 16; ++i) {
+      const u16 bit = u16(1) << i;
+      if (compat_2d_mask & bit)
+        compat_bundle->texture2D->setTexture(
+            compat_2d[i], vs.null_textures[kNullTexture2DDescriptorIndex].get(),
+            plume::RenderTextureLayout::SHADER_READ,
+            vs.null_texture_views[kNullTexture2DDescriptorIndex].get());
+      if (compat_3d_mask & bit)
+        compat_bundle->texture3D->setTexture(
+            compat_3d[i], vs.null_textures[kNullTexture3DDescriptorIndex].get(),
+            plume::RenderTextureLayout::SHADER_READ,
+            vs.null_texture_views[kNullTexture3DDescriptorIndex].get());
+      if (compat_cube_mask & bit)
+        compat_bundle->textureCube->setTexture(
+            compat_cube[i], vs.null_textures[kNullTextureCubeDescriptorIndex].get(),
+            plume::RenderTextureLayout::SHADER_READ,
+            vs.null_texture_views[kNullTextureCubeDescriptorIndex].get());
+      if (compat_sampler_mask & bit)
+        compat_bundle->samplers->setSampler(compat_sampler[i],
+                                            vs.default_sampler.get());
+    }
+  }
   for (u32 i = 0; i < 16; ++i) {
-    s.shared.samplerIndices[i] = 0;
-    s.shared.texture2DIndices[i] = bd::gpu::kNullTexture2DDescriptorIndex;
-    s.shared.texture3DIndices[i] = bd::gpu::kNullTexture3DDescriptorIndex;
-    s.shared.textureCubeIndices[i] = bd::gpu::kNullTextureCubeDescriptorIndex;
+    if (compat_bundle) {
+      // Preserve the X360 0..15 guest slot ABI in SharedConstants while the
+      // Vulkan descriptor sets contain only the slots this shader can read.
+      s.shared.samplerIndices[i] = compat_sampler[i];
+      s.shared.texture2DIndices[i] = compat_2d[i];
+      s.shared.texture3DIndices[i] = compat_3d[i];
+      s.shared.textureCubeIndices[i] = compat_cube[i];
+    } else {
+      s.shared.samplerIndices[i] = 0;
+      s.shared.texture2DIndices[i] = bd::gpu::kNullTexture2DDescriptorIndex;
+      s.shared.texture3DIndices[i] = bd::gpu::kNullTexture3DDescriptorIndex;
+      s.shared.textureCubeIndices[i] = bd::gpu::kNullTextureCubeDescriptorIndex;
+    }
 
     bd::gpu::GuestTexture *tex = vs.textures[i];
     if (tex && tex->sourceSurface && tex->sourceSurface->texture &&
@@ -319,30 +438,76 @@ ConstantAllocation UploadSharedConstants(u32 device_guest) {
             bd::gpu::kInvalidDescriptorIndex) {
       tex = tex->sourceSurface;
     }
-    if (tex && tex->descriptorIndex != bd::gpu::kInvalidDescriptorIndex) {
+    if (tex && tex->texture && tex->textureView &&
+        (compat_bundle ||
+         tex->descriptorIndex != bd::gpu::kInvalidDescriptorIndex)) {
       switch (tex->viewDimension) {
       case plume::RenderTextureViewDimension::TEXTURE_3D:
-        s.shared.texture3DIndices[i] = tex->descriptorIndex;
+        if (compat_bundle) {
+          if ((compat_3d_mask & (u16(1) << i)) != 0)
+            compat_bundle->texture3D->setTexture(
+                compat_3d[i], tex->texture,
+                plume::RenderTextureLayout::SHADER_READ,
+                tex->textureView.get());
+        } else {
+          s.shared.texture3DIndices[i] = tex->descriptorIndex;
+        }
         // X360: a 2D fetch on a 3D resource reads slice 0, so publish the
         // volume as its slice-0 2D view too so tfetch2D samples the base layer.
-        if (tex->companion2D && tex->companion2D->descriptorIndex !=
-                                    bd::gpu::kInvalidDescriptorIndex) {
-          s.shared.texture2DIndices[i] = tex->companion2D->descriptorIndex;
+        if (tex->companion2D && tex->companion2D->texture &&
+            tex->companion2D->textureView &&
+            (compat_bundle || tex->companion2D->descriptorIndex !=
+                                  bd::gpu::kInvalidDescriptorIndex)) {
+          if (compat_bundle) {
+            if ((compat_2d_mask & (u16(1) << i)) != 0)
+              compat_bundle->texture2D->setTexture(
+                  compat_2d[i], tex->companion2D->texture,
+                  plume::RenderTextureLayout::SHADER_READ,
+                  tex->companion2D->textureView.get());
+          } else {
+            s.shared.texture2DIndices[i] = tex->companion2D->descriptorIndex;
+          }
         }
         break;
       case plume::RenderTextureViewDimension::TEXTURE_CUBE:
-        s.shared.textureCubeIndices[i] = tex->descriptorIndex;
+        if (compat_bundle) {
+          if ((compat_cube_mask & (u16(1) << i)) != 0)
+            compat_bundle->textureCube->setTexture(
+                compat_cube[i], tex->texture,
+                plume::RenderTextureLayout::SHADER_READ,
+                tex->textureView.get());
+        } else {
+          s.shared.textureCubeIndices[i] = tex->descriptorIndex;
+        }
         break;
       case plume::RenderTextureViewDimension::TEXTURE_2D:
       case plume::RenderTextureViewDimension::UNKNOWN:
       default:
-        s.shared.texture2DIndices[i] = tex->descriptorIndex;
+        if (compat_bundle) {
+          if ((compat_2d_mask & (u16(1) << i)) != 0)
+            compat_bundle->texture2D->setTexture(
+                compat_2d[i], tex->texture,
+                plume::RenderTextureLayout::SHADER_READ,
+                tex->textureView.get());
+        } else {
+          s.shared.texture2DIndices[i] = tex->descriptorIndex;
+        }
         // BD static reflection cubes bind as a 2D atlas yet the water/glass
         // shader cube-fetches the slot, so publish the sliced TextureCube
         // companion so tfetchCube resolves a real cube, not the null cube.
-        if (tex->companionCube && tex->companionCube->descriptorIndex !=
-                                      bd::gpu::kInvalidDescriptorIndex) {
-          s.shared.textureCubeIndices[i] = tex->companionCube->descriptorIndex;
+        if (tex->companionCube && tex->companionCube->texture &&
+            tex->companionCube->textureView &&
+            (compat_bundle || tex->companionCube->descriptorIndex !=
+                                  bd::gpu::kInvalidDescriptorIndex)) {
+          if (compat_bundle) {
+            if ((compat_cube_mask & (u16(1) << i)) != 0)
+              compat_bundle->textureCube->setTexture(
+                  compat_cube[i], tex->companionCube->texture,
+                  plume::RenderTextureLayout::SHADER_READ,
+                  tex->companionCube->textureView.get());
+          } else {
+            s.shared.textureCubeIndices[i] = tex->companionCube->descriptorIndex;
+          }
         }
         break;
       }
@@ -358,26 +523,33 @@ ConstantAllocation UploadSharedConstants(u32 device_guest) {
         };
         const bool clamp3d =
             tex->viewDimension == plume::RenderTextureViewDimension::TEXTURE_3D;
-        auto &sc = s.samplerSlots[i];
-        if (sc.valid && sc.clamp3d == clamp3d && sc.aniso == aniso_now &&
-            std::memcmp(sc.fc, fc, sizeof(fc)) == 0) {
-          s.shared.samplerIndices[i] = sc.sampler;
-        } else {
-          auto desc = DecodeFromFetch(fc);
+        auto desc = DecodeFromFetch(fc);
 
-          // Shell fur volumes encode shell depth in W, and X360-default WRAP
-          // wraps a z=0 fetch's second tap to the tip slice and halves density,
-          // so force CLAMP to keep both taps on the dense base slice.
-          if (clamp3d) {
-            desc.addressW = plume::RenderTextureAddressMode::CLAMP;
+        // Shell fur volumes encode shell depth in W, and X360-default WRAP
+        // wraps a z=0 fetch's second tap to the tip slice and halves density,
+        // so force CLAMP to keep both taps on the dense base slice.
+        if (clamp3d)
+          desc.addressW = plume::RenderTextureAddressMode::CLAMP;
+
+        if (compat_bundle) {
+          if (auto *sampler = ResolveSamplerObjectLocked(desc)) {
+            if ((compat_sampler_mask & (u16(1) << i)) != 0)
+              compat_bundle->samplers->setSampler(compat_sampler[i], sampler);
           }
-          const u32 resolved = ResolveSlotLocked(desc);
-          std::memcpy(sc.fc, fc, sizeof(fc));
-          sc.sampler = resolved;
-          sc.aniso = aniso_now;
-          sc.clamp3d = clamp3d;
-          sc.valid = true;
-          s.shared.samplerIndices[i] = resolved;
+        } else {
+          auto &sc = s.samplerSlots[i];
+          if (sc.valid && sc.clamp3d == clamp3d && sc.aniso == aniso_now &&
+              std::memcmp(sc.fc, fc, sizeof(fc)) == 0) {
+            s.shared.samplerIndices[i] = sc.sampler;
+          } else {
+            const u32 resolved = ResolveSlotLocked(desc);
+            std::memcpy(sc.fc, fc, sizeof(fc));
+            sc.sampler = resolved;
+            sc.aniso = aniso_now;
+            sc.clamp3d = clamp3d;
+            sc.valid = true;
+            s.shared.samplerIndices[i] = resolved;
+          }
         }
       }
     }
@@ -422,22 +594,63 @@ ConstantAllocation UploadSharedConstants(u32 device_guest) {
   s.shared.blitHalfPixelOffsetY =
       vs.viewport.height > 0.0f ? -1.0f / vs.viewport.height : 0.0f;
 
-  // Byte-identical to the block already bound on this command list: the live
-  // CBV is still correct, skip the upload and let the caller skip the rebind.
-  // SharedConstants padding is zero-initialized and never written, so memcmp
-  // is deterministic.
-  if (s.sharedBound &&
-      std::memcmp(&s.shared, &s.lastUploaded, sizeof(SharedConstants)) == 0) {
+  // UBO mode still needs a descriptor rebind every draw, but when the block is
+  // byte-identical we can reuse the current frame-slot allocation instead of
+  // copying another 352 bytes. Non-UBO preserves the original skip behavior.
+  const bool shared_unchanged =
+      s.sharedBound &&
+      std::memcmp(&s.shared, &s.lastUploaded, sizeof(SharedConstants)) == 0;
+  FrameUpload &frame_up = s.frames[s.cursor];
+  ConstantAllocation bound_shared{};
+  if (shared_unchanged && vs.descriptor_ubo_mode &&
+      frame_up.cachedShared.size) {
+    bound_shared = frame_up.cachedShared;
+  } else if (shared_unchanged && !vs.descriptor_ubo_mode) {
+    if (compat_bundle)
+      BindCompatDescriptorBundleLocked(vs, *compat_bundle);
     return {};
+  } else {
+    bound_shared = Allocate(s, sizeof(SharedConstants), kCBVAlignment);
+    if (!bound_shared.memory)
+      return {};
+    std::memcpy(bound_shared.memory, &s.shared, sizeof(SharedConstants));
+    s.lastUploaded = s.shared;
+    s.sharedBound = true;
+    frame_up.cachedShared = bound_shared;
   }
 
-  auto alloc = Allocate(s, sizeof(SharedConstants), kCBVAlignment);
-  if (!alloc.memory)
-    return {};
-  std::memcpy(alloc.memory, &s.shared, sizeof(SharedConstants));
-  s.lastUploaded = s.shared;
-  s.sharedBound = true;
-  return alloc;
+  if (compat_bundle && vs.descriptor_ubo_mode) {
+    if (!vs_alloc || !ps_alloc || !vs_alloc->size || !ps_alloc->size ||
+        !vs_alloc->ref.ref || !ps_alloc->ref.ref || !bound_shared.ref.ref) {
+      BD_ERROR("descriptor UBO: missing VS/PS/Shared constant allocation");
+      return {};
+    }
+
+    const auto bind_ubo = [](plume::RenderDescriptorSet *set, u32 index,
+                             const ConstantAllocation &a) {
+      if (!set || !a.ref.ref || !a.size)
+        return false;
+      if (a.ref.offset > std::numeric_limits<u32>::max())
+        return false;
+      plume::RenderBufferStructuredView view(
+          1, static_cast<u32>(a.ref.offset));
+      set->setBuffer(index, a.ref.ref, a.size, &view);
+      return true;
+    };
+
+    // Descriptor index 0..8 is Texture2D[9]. The following three single
+    // ranges are set0 bindings 1/2/3: VS, PS and SharedConstants.
+    if (!bind_ubo(compat_bundle->texture2D.get(), 9, *vs_alloc) ||
+        !bind_ubo(compat_bundle->texture2D.get(), 10, *ps_alloc) ||
+        !bind_ubo(compat_bundle->texture2D.get(), 11, bound_shared)) {
+      BD_ERROR("descriptor UBO: failed to bind VS/PS/Shared constants");
+      return {};
+    }
+  }
+
+  if (compat_bundle)
+    BindCompatDescriptorBundleLocked(vs, *compat_bundle);
+  return bound_shared;
 }
 
 ConstantAllocation UploadGuestBytesByteSwap32(u32 guest_va, u32 size,

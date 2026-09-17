@@ -7,7 +7,15 @@
 #include <fstream>
 #include <mutex>
 
+extern "C" void ReblueAndroidCrashStage(int stage);
+extern "C" int ReblueAndroidCrashStageGet();
+extern "C" int ReblueAndroidCrashStageThreadGet();
+
 namespace bd {
+
+inline void AndroidCrashStage(int stage) { ReblueAndroidCrashStage(stage); }
+inline int AndroidCrashStageGet() { return ReblueAndroidCrashStageGet(); }
+inline int AndroidCrashStageThreadGet() { return ReblueAndroidCrashStageThreadGet(); }
 
 inline void AndroidDiag(std::string_view line) {
   const char *path = std::getenv("REBLUE_DIAG_FILE");
@@ -30,6 +38,9 @@ inline void AndroidDiag(std::string_view line) {
 
 namespace bd {
 inline void AndroidDiag(std::string_view) {}
+inline void AndroidCrashStage(int) {}
+inline int AndroidCrashStageGet() { return 0; }
+inline int AndroidCrashStageThreadGet() { return 0; }
 } // namespace bd
 
 #endif

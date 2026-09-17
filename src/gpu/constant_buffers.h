@@ -73,14 +73,18 @@ void ResetFrame(u32 slot);
 
 // Byte-swap VS/PS float constants from guest device+0x700 / device+0x1700 into
 // the upload heap.
-ConstantAllocation UploadVertexShaderConstants(u32 device_guest);
-ConstantAllocation UploadPixelShaderConstants(u32 device_guest);
+ConstantAllocation UploadVertexShaderConstants(u32 device_guest,
+                                               bool force_upload = true);
+ConstantAllocation UploadPixelShaderConstants(u32 device_guest,
+                                              bool force_upload = true);
 
 // Rebuilt from live guest state every draw: sampler fetch constants and bool
 // constants come from unhooked recompiled code, so there is no dirty signal.
 // size == 0 means byte-identical to what is already bound on this command list
 // and the caller can skip the upload + root rebind.
-ConstantAllocation UploadSharedConstants(u32 device_guest);
+ConstantAllocation UploadSharedConstants(
+    u32 device_guest, const ConstantAllocation *vs_alloc = nullptr,
+    const ConstantAllocation *ps_alloc = nullptr);
 
 // Root bindings do not survive begin(), so this drops the 'shared CB still
 // bound' reuse gate. Call on every command list reset.

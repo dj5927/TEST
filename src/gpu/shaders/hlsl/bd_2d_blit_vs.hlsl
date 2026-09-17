@@ -4,7 +4,12 @@
 
 #include "thirdparty/XenosRecomp/XenosRecomp/shader_common.h"
 
-#ifdef __spirv__
+#if defined(__spirv__) && defined(REBLUE_SPIRV_UBO_COMPAT)
+cbuffer ReblueSharedConstants : register(b3, space0)
+{
+    float2 g_BlitHalfPixelOffset : packoffset(c21.x);
+};
+#elif defined(__spirv__)
 #define g_BlitHalfPixelOffset \
     vk::RawBufferLoad<float2>(g_PushConstants.SharedConstants + 336)
 #else

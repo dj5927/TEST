@@ -6,7 +6,13 @@
 // Declared field-by-field, not via DEFINE_SHARED_CONSTANTS(): this shader is
 // built without REBLUE_RECOMP, so that macro would place them on the other
 // layout's offsets.
-#ifdef __spirv__
+#if defined(__spirv__) && defined(REBLUE_SPIRV_UBO_COMPAT)
+cbuffer ReblueSharedConstants : register(b3, space0)
+{
+    uint Tex0_ResourceDescriptorIndex : packoffset(c0.x);
+    uint Tex0_SamplerDescriptorIndex  : packoffset(c12.x);
+};
+#elif defined(__spirv__)
 #define Tex0_ResourceDescriptorIndex vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 0)
 #define Tex0_SamplerDescriptorIndex  vk::RawBufferLoad<uint>(g_PushConstants.SharedConstants + 192)
 #else

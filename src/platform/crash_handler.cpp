@@ -22,6 +22,7 @@
 #include <rex/runtime.h>
 #include <rex/version.h>
 
+#include "core/android_diag.h"
 #include "core/logging.h"
 #include "platform/fatal_dialog.h"
 
@@ -42,9 +43,28 @@ extern "C"
 #include <cxxabi.h>
 #include <dlfcn.h>
 #include <execinfo.h>
+#if defined(__ANDROID__)
+#include <fcntl.h>
+#include <ucontext.h>
+#endif
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
+#endif
+
+#if defined(__ANDROID__)
+static volatile sig_atomic_t g_reblue_android_crash_stage = 0;
+static volatile sig_atomic_t g_reblue_android_crash_stage_tid = 0;
+extern "C" void ReblueAndroidCrashStage(int stage) {
+  g_reblue_android_crash_stage = static_cast<sig_atomic_t>(stage);
+  g_reblue_android_crash_stage_tid = static_cast<sig_atomic_t>(gettid());
+}
+extern "C" int ReblueAndroidCrashStageGet() {
+  return static_cast<int>(g_reblue_android_crash_stage);
+}
+extern "C" int ReblueAndroidCrashStageThreadGet() {
+  return static_cast<int>(g_reblue_android_crash_stage_tid);
+}
 #endif
 
 namespace bd::platform {
@@ -70,6 +90,271 @@ u64 HostModuleBase() { return 0; }
 // Resolved at install, never on the crash path: the handler must not call into
 // the filesystem while unwinding a fault.
 std::string g_host_module_name;
+
+#if defined(__ANDROID__)
+constexpr size_t kAndroidDiagPathCapacity = 4096;
+char g_android_diag_path[kAndroidDiagPathCapacity] = {};
+u64 g_android_libmain_base = 0;
+
+char *DiagAppendText(char *p, char *end, const char *text) {
+  while (p < end && text && *text)
+    *p++ = *text++;
+  return p;
+}
+
+char *DiagAppendDec(char *p, char *end, i64 value) {
+  if (value < 0) {
+    if (p < end)
+      *p++ = '-';
+    value = -value;
+  }
+  char tmp[24];
+  size_t n = 0;
+  do {
+    tmp[n++] = static_cast<char>('0' + (value % 10));
+    value /= 10;
+  } while (value && n < sizeof(tmp));
+  while (n && p < end)
+    *p++ = tmp[--n];
+  return p;
+}
+
+char *DiagAppendHex(char *p, char *end, u64 value) {
+  static constexpr char kHex[] = "0123456789abcdef";
+  p = DiagAppendText(p, end, "0x");
+  for (int shift = 60; shift >= 0 && p < end; shift -= 4)
+    *p++ = kHex[(value >> shift) & 0xF];
+  return p;
+}
+
+const char *BusCodeName(int code) {
+  switch (code) {
+#ifdef BUS_ADRALN
+  case BUS_ADRALN:
+    return "BUS_ADRALN";
+#endif
+#ifdef BUS_ADRERR
+  case BUS_ADRERR:
+    return "BUS_ADRERR";
+#endif
+#ifdef BUS_OBJERR
+  case BUS_OBJERR:
+    return "BUS_OBJERR";
+#endif
+#ifdef BUS_MCEERR_AR
+  case BUS_MCEERR_AR:
+    return "BUS_MCEERR_AR";
+#endif
+#ifdef BUS_MCEERR_AO
+  case BUS_MCEERR_AO:
+    return "BUS_MCEERR_AO";
+#endif
+  default:
+    return "BUS_UNKNOWN";
+  }
+}
+
+const char *AndroidStageName(int stage) {
+  switch (stage) {
+  case 90: return "swapchain object created";
+  case 100: return "before VulkanSwapChain::resize";
+  case 101: return "resize enter";
+  case 102: return "resize after window size";
+  case 103: return "resize after surface caps";
+  case 104: return "resize after surface formats";
+  case 105: return "before vkCreateSwapchainKHR";
+  case 106: return "after vkCreateSwapchainKHR";
+  case 107: return "after swapchain image count query";
+  case 108: return "after swapchain image fetch";
+  case 120: return "before imageView 0";
+  case 121: return "before imageView 1";
+  case 122: return "before imageView 2";
+  case 123: return "before imageView 3";
+  case 124: return "after imageView 0";
+  case 125: return "after imageView 1";
+  case 126: return "after imageView 2";
+  case 127: return "after imageView 3";
+  case 130: return "resize body complete";
+  case 131: return "resize locals destroyed / function epilogue";
+  case 140: return "resize returned to caller";
+  case 150: return "isEmpty bypassed";
+  case 200: return "BuildFramebuffers enter";
+  case 201: return "before framebuffer texture count";
+  case 202: return "after framebuffer texture count";
+  case 210: return "before getTexture 0";
+  case 211: return "before getTexture 1";
+  case 212: return "before getTexture 2";
+  case 213: return "before getTexture 3";
+  case 220: return "after getTexture 0";
+  case 221: return "after getTexture 1";
+  case 222: return "after getTexture 2";
+  case 223: return "after getTexture 3";
+  case 230: return "before createFramebuffer 0";
+  case 231: return "before createFramebuffer 1";
+  case 232: return "before createFramebuffer 2";
+  case 233: return "before createFramebuffer 3";
+  case 240: return "after createFramebuffer 0";
+  case 241: return "after createFramebuffer 1";
+  case 242: return "after createFramebuffer 2";
+  case 243: return "after createFramebuffer 3";
+  case 250: return "BuildFramebuffers complete";
+  case 300: return "BuildPresentSemaphores enter";
+  case 301: return "before semaphore texture count";
+  case 302: return "after semaphore texture count";
+  case 310: return "before createSemaphore 0";
+  case 311: return "before createSemaphore 1";
+  case 312: return "before createSemaphore 2";
+  case 313: return "before createSemaphore 3";
+  case 320: return "after createSemaphore 0";
+  case 321: return "after createSemaphore 1";
+  case 322: return "after createSemaphore 2";
+  case 323: return "after createSemaphore 3";
+  case 330: return "BuildPresentSemaphores complete";
+  case 400: return "swapchain init block complete";
+  case 401: return "before BuildPipelineLayout";
+  case 410: return "BuildPipelineLayout enter";
+  case 411: return "before texture descriptor layout";
+  case 412: return "after texture descriptor layout";
+  case 413: return "before null texture descriptors";
+  case 414: return "after null texture descriptors";
+  case 420: return "before sampler descriptor layout";
+  case 421: return "after sampler descriptor layout";
+  case 422: return "before default sampler";
+  case 423: return "after default sampler";
+  case 424: return "before point sampler";
+  case 425: return "after point sampler";
+  case 430: return "before occlusion descriptor sets";
+  case 431: return "occlusion set4 bypassed for four-set compatibility";
+  case 440: return "before main pipeline layout";
+  case 441: return "after main pipeline layout";
+  case 442: return "VulkanPipelineLayout constructor enter";
+  case 443: return "sampled-image descriptor limit exceeded";
+  case 444: return "sampler descriptor limit exceeded";
+  case 445: return "push-constant limit exceeded";
+  case 446: return "maxBoundDescriptorSets exceeded";
+  case 450: return "before pipeline set layout 0";
+  case 451: return "before pipeline set layout 1";
+  case 452: return "before pipeline set layout 2";
+  case 453: return "before pipeline set layout 3";
+  case 454: return "before pipeline set layout 4";
+  case 455: return "pipeline set layout 0 creation failed";
+  case 456: return "pipeline set layout 1 creation failed";
+  case 457: return "pipeline set layout 2 creation failed";
+  case 458: return "pipeline set layout 3 creation failed";
+  case 459: return "pipeline set layout 4 creation failed";
+  case 460: return "after pipeline set layout 0";
+  case 461: return "after pipeline set layout 1";
+  case 462: return "after pipeline set layout 2";
+  case 463: return "after pipeline set layout 3";
+  case 464: return "after pipeline set layout 4";
+  case 470: return "before vkCreatePipelineLayout";
+  case 471: return "after vkCreatePipelineLayout";
+  case 472: return "vkCreatePipelineLayout returned error";
+  case 473: return "pipeline layout internal handle is null";
+  case 499: return "BuildPipelineLayout complete";
+  case 500: return "before BuildCopyPipeline";
+  case 510: return "BuildCopyPipeline enter";
+  case 512: return "copy helper shaders created";
+  case 521: return "MSAA resolve shaders created";
+  case 530: return "before copy-color pipeline";
+  case 531: return "after copy-color pipeline";
+  case 540: return "before gamma pipeline";
+  case 541: return "after gamma pipeline";
+  case 550: return "BuildCopyPipeline complete";
+  case 599: return "BuildCopyPipeline returned";
+  case 600: return "before TryInit";
+  case 601: return "after TryInit";
+  case 700: return "host pre-runtime init complete";
+  case 701: return "returning before Runtime exists";
+  case 800: return "Runtime exists; guest-tail init";
+  default: return "unknown";
+  }
+}
+
+void SignalSafeWriteAll(int fd, const char *data, size_t size) {
+  while (size) {
+    const ssize_t n = write(fd, data, size);
+    if (n <= 0)
+      return;
+    data += static_cast<size_t>(n);
+    size -= static_cast<size_t>(n);
+  }
+}
+
+void AppendAndroidSignalDiag(int sig, siginfo_t *info, void *context) {
+  if (!g_android_diag_path[0])
+    return;
+
+  const int fd = open(g_android_diag_path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+  if (fd < 0)
+    return;
+
+  char line[1536];
+  char *p = line;
+  char *const end = line + sizeof(line) - 1;
+  p = DiagAppendText(p, end, "\n=== V042 NATIVE CRASH ===\nstage=");
+  p = DiagAppendDec(p, end, bd::AndroidCrashStageGet());
+  p = DiagAppendText(p, end, "\nstage_tid=");
+  p = DiagAppendDec(p, end, bd::AndroidCrashStageThreadGet());
+  p = DiagAppendText(p, end, "\ncrash_tid=");
+  p = DiagAppendDec(p, end, static_cast<i64>(gettid()));
+  p = DiagAppendText(p, end, "\nsignal=");
+  p = DiagAppendDec(p, end, sig);
+  if (sig == SIGBUS) {
+    p = DiagAppendText(p, end, " SIGBUS\nsi_code=");
+    p = DiagAppendDec(p, end, info ? info->si_code : 0);
+    p = DiagAppendText(p, end, " ");
+    p = DiagAppendText(p, end, BusCodeName(info ? info->si_code : 0));
+  }
+  p = DiagAppendText(p, end, "\nfault_address=");
+  p = DiagAppendHex(p, end,
+                    info ? reinterpret_cast<u64>(info->si_addr) : 0);
+  p = DiagAppendText(p, end, "\nlibmain_base=");
+  p = DiagAppendHex(p, end, g_android_libmain_base);
+
+#if defined(__aarch64__)
+  const auto *uc = reinterpret_cast<const ucontext_t *>(context);
+  const u64 pc = uc ? static_cast<u64>(uc->uc_mcontext.pc) : 0;
+  const u64 sp = uc ? static_cast<u64>(uc->uc_mcontext.sp) : 0;
+  const u64 lr = uc ? static_cast<u64>(uc->uc_mcontext.regs[30]) : 0;
+  p = DiagAppendText(p, end, "\npc=");
+  p = DiagAppendHex(p, end, pc);
+  p = DiagAppendText(p, end, "\nlr=");
+  p = DiagAppendHex(p, end, lr);
+  p = DiagAppendText(p, end, "\nsp=");
+  p = DiagAppendHex(p, end, sp);
+  if (g_android_libmain_base && pc >= g_android_libmain_base &&
+      pc - g_android_libmain_base < kHostImageSpan) {
+    p = DiagAppendText(p, end, "\npc_libmain_rva=");
+    p = DiagAppendHex(p, end, pc - g_android_libmain_base);
+  }
+  if (g_android_libmain_base && lr >= g_android_libmain_base &&
+      lr - g_android_libmain_base < kHostImageSpan) {
+    p = DiagAppendText(p, end, "\nlr_libmain_rva=");
+    p = DiagAppendHex(p, end, lr - g_android_libmain_base);
+  }
+#else
+  (void)context;
+#endif
+  p = DiagAppendText(p, end, "\n=== END V042 NATIVE CRASH ===\n");
+  SignalSafeWriteAll(fd, line, static_cast<size_t>(p - line));
+  close(fd);
+}
+
+void InitAndroidSignalDiag() {
+  const char *path = std::getenv("REBLUE_DIAG_FILE");
+  if (path && *path) {
+    std::strncpy(g_android_diag_path, path, kAndroidDiagPathCapacity - 1);
+    g_android_diag_path[kAndroidDiagPathCapacity - 1] = '\0';
+  }
+
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void *>(&g_host_module_name), &info) &&
+      info.dli_fbase) {
+    g_android_libmain_base = reinterpret_cast<u64>(info.dli_fbase);
+  }
+}
+#endif
 
 const char *HostModuleName() {
   return g_host_module_name.empty() ? "host" : g_host_module_name.c_str();
@@ -386,9 +671,13 @@ const char *SignalName(int sig) {
 // SIGSEGV/SIGILL stay with the SDK dispatcher, which needs first refusal on
 // them to service guest MMIO. These three have no owner, so take them directly:
 // without this the process vanishes with nothing in the log at all.
-void FatalSignalHandler(int sig, siginfo_t *info, void * /*context*/) {
+void FatalSignalHandler(int sig, siginfo_t *info, void *context) {
   if (s_reporting.test_and_set(std::memory_order_acq_rel))
     DieWithDefaultDisposition(sig);
+
+#if defined(__ANDROID__)
+  AppendAndroidSignalDiag(sig, info, context);
+#endif
 
   BD_CRITICAL("================ reblue host crash ================");
   BD_CRITICAL("build: {}", REXGLUE_BUILD_TITLE);
@@ -401,9 +690,39 @@ void FatalSignalHandler(int sig, siginfo_t *info, void * /*context*/) {
   BD_CRITICAL("===================================================");
   rex::FlushLogging();
 
+#if defined(__ANDROID__)
+  const int stage = bd::AndroidCrashStageGet();
+  const int stage_tid = bd::AndroidCrashStageThreadGet();
+  const int crash_tid = static_cast<int>(gettid());
+  u64 pc = 0, lr = 0, sp = 0;
+#if defined(__aarch64__)
+  const auto *uc = reinterpret_cast<const ucontext_t *>(context);
+  if (uc) {
+    pc = static_cast<u64>(uc->uc_mcontext.pc);
+    lr = static_cast<u64>(uc->uc_mcontext.regs[30]);
+    sp = static_cast<u64>(uc->uc_mcontext.sp);
+  }
+#endif
+  const int si_code = info ? info->si_code : 0;
+  const u64 fault = info ? reinterpret_cast<u64>(info->si_addr) : 0;
+  ShowFatalError(
+      "reblue V37 Crashed",
+      fmt::format(
+          "V37 mobile-core descriptor crash\n\n"
+          "stage={} ({})\n"
+          "stage_tid={} crash_tid={} same_thread={}\n"
+          "signal={} {}\n"
+          "si_code={} {}\n"
+          "fault={:#018x}\n"
+          "PC={:#018x}\nLR={:#018x}\nSP={:#018x}",
+          stage, AndroidStageName(stage), stage_tid, crash_tid,
+          stage_tid == crash_tid ? "YES" : "NO", sig, SignalName(sig), si_code,
+          sig == SIGBUS ? BusCodeName(si_code) : "-", fault, pc, lr, sp));
+#else
   ShowFatalError("reblue Crashed",
                  fmt::format("reblue hit a fatal error and has to close.\n\n{}",
                              SignalName(sig)));
+#endif
   DieWithDefaultDisposition(sig);
 }
 #endif
@@ -440,6 +759,10 @@ void InstallTerminateHandler() {
 
 #if !defined(_WIN32)
   InstallCrashStackForThread();
+
+#if defined(__ANDROID__)
+  InitAndroidSignalDiag();
+#endif
 
   struct sigaction sa{};
   sa.sa_sigaction = &FatalSignalHandler;

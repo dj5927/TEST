@@ -65,7 +65,7 @@ struct DescKeyHash {
 
 struct CachedSampler {
   std::unique_ptr<plume::RenderSampler> sampler;
-  u32 slot = 0;
+  u32 slot = kInvalidDescriptorIndex;
 };
 
 struct Cache {
@@ -143,10 +143,11 @@ plume::RenderSamplerDesc DecodeFromFetch(const u32 fc[6]) {
   return d;
 }
 
-u32 ResolveSlotLocked(const plume::RenderSamplerDesc &desc) {
+plume::RenderSampler *ResolveSamplerObjectLocked(
+    const plume::RenderSamplerDesc &desc) {
   auto &s = state();
-  if (!s.ready || !s.device || !s.sampler_descriptor_set)
-    return 0;
+  if (!s.device)
+    return nullptr;
 
   const DescKey key{
       desc.addressU,    desc.addressV,      desc.addressW,
@@ -159,6 +160,39 @@ u32 ResolveSlotLocked(const plume::RenderSamplerDesc &desc) {
     std::lock_guard lock(c.mutex);
     auto it = c.map.find(key);
     if (it != c.map.end())
+      return it->second.sampler.get();
+  }
+
+  auto sampler = s.device->createSampler(desc);
+  if (!sampler)
+    return s.default_sampler.get();
+
+  std::lock_guard lock(c.mutex);
+  auto [it, inserted] = c.map.emplace(
+      key, CachedSampler{std::move(sampler), kInvalidDescriptorIndex});
+  return it->second.sampler.get();
+}
+
+u32 ResolveSlotLocked(const plume::RenderSamplerDesc &desc) {
+  auto &s = state();
+  if (!s.ready || !s.device || !s.sampler_descriptor_set)
+    return 0;
+
+  const DescKey key{
+      desc.addressU,    desc.addressV,      desc.addressW,
+      desc.minFilter,   desc.magFilter,     desc.mipmapMode,
+      desc.borderColor, desc.maxAnisotropy, desc.anisotropyEnabled,
+  };
+
+  plume::RenderSampler *sampler = ResolveSamplerObjectLocked(desc);
+  if (!sampler)
+    return 0;
+
+  auto &c = cache();
+  {
+    std::lock_guard lock(c.mutex);
+    auto it = c.map.find(key);
+    if (it != c.map.end() && it->second.slot != kInvalidDescriptorIndex)
       return it->second.slot;
   }
 
@@ -173,15 +207,14 @@ u32 ResolveSlotLocked(const plume::RenderSamplerDesc &desc) {
     return 0;
   }
 
-  auto sampler = s.device->createSampler(desc);
-  s.sampler_descriptor_set->setSampler(slot, sampler.get());
+  s.sampler_descriptor_set->setSampler(slot, sampler);
 
   std::lock_guard lock(c.mutex);
-  // On a race, return the winner's slot. Ours leaks (no reclaim on drop here).
   auto it = c.map.find(key);
-  if (it != c.map.end())
+  if (it != c.map.end() && it->second.slot != kInvalidDescriptorIndex)
     return it->second.slot;
-  c.map.emplace(key, CachedSampler{std::move(sampler), slot});
+  if (it != c.map.end())
+    it->second.slot = slot;
   return slot;
 }
 

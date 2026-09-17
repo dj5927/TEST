@@ -1,7 +1,12 @@
 #include "copy_common.hlsli"
 
+#if defined(REBLUE_DESCRIPTOR_COMPAT)
+Texture2D<float4> g_Texture2DDescriptorHeap[9] : register(t0, space0);
+SamplerState     g_SamplerDescriptorHeap[9]   : register(s0, space3);
+#else
 Texture2D<float4> g_Texture2DDescriptorHeap[] : register(t0, space0);
 SamplerState     g_SamplerDescriptorHeap[]   : register(s0, space3);
+#endif
 
 static const uint kMaxBoxTaps = 8u;
 

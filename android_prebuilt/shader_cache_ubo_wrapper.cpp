@@ -1,0 +1,11 @@
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+#define g_shaderCacheEntries g_uboShaderCacheEntries
+#define g_shaderCacheEntryCount g_uboShaderCacheEntryCount
+#define g_compressedDxilCache g_uboCompressedDxilCache
+#define g_dxilCacheCompressedSize g_uboDxilCacheCompressedSize
+#define g_dxilCacheDecompressedSize g_uboDxilCacheDecompressedSize
+#define g_compressedSpirvCache g_uboCompressedSpirvCache
+#define g_spirvCacheCompressedSize g_uboSpirvCacheCompressedSize
+#define g_spirvCacheDecompressedSize g_uboSpirvCacheDecompressedSize
+#include "shader_cache_mobile_ubo.cpp"
+#endif

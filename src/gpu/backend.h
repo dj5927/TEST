@@ -48,6 +48,15 @@ inline constexpr bool g_mvk = false;
 #define REBLUE_SHADER_BLOB(name)                                               \
   REBLUE_BLOB_SYMBOL(name), sizeof(REBLUE_BLOB_SYMBOL(name))
 
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+#define REBLUE_COMPAT_BLOB_SYMBOL(name) g_##name##_compat_spirv
+#define REBLUE_COMPAT_SHADER_BLOB(name)                                        \
+  REBLUE_COMPAT_BLOB_SYMBOL(name), sizeof(REBLUE_COMPAT_BLOB_SYMBOL(name))
+#define REBLUE_UBO_BLOB_SYMBOL(name) g_##name##_ubo_spirv
+#define REBLUE_UBO_SHADER_BLOB(name)                                           \
+  REBLUE_UBO_BLOB_SYMBOL(name), sizeof(REBLUE_UBO_BLOB_SYMBOL(name))
+#endif
+
 // One shared VERTEX|PIXEL push constant range, since VUID 00292 lets a stage
 // appear in only one: guest addresses at [0,24), copy helper block at [24,40).
 #if defined(REBLUE_D3D12)

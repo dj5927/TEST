@@ -25,6 +25,15 @@ namespace bd::gpu {
 void Occlusion::Begin() {
   auto &s = state();
   std::lock_guard lock(s.mutex);
+#if defined(__ANDROID__)
+  if (s.descriptor_compat_mode) {
+    s.occlusion_counting = false;
+    s.occlusion_last_count = 16384;
+    Video::SetDirtyValue(s.dirtyStates.pipelineState,
+                         s.pipelineState.occlusionCounting, false);
+    return;
+  }
+#endif
   if (!s.ready || !s.device)
     return;
   BeginCommandList(s);
@@ -138,6 +147,15 @@ void Occlusion::Begin() {
 void Occlusion::End() {
   auto &s = state();
   std::lock_guard lock(s.mutex);
+#if defined(__ANDROID__)
+  if (s.descriptor_compat_mode) {
+    s.occlusion_counting = false;
+    s.occlusion_last_count = 16384;
+    Video::SetDirtyValue(s.dirtyStates.pipelineState,
+                         s.pipelineState.occlusionCounting, false);
+    return;
+  }
+#endif
   s.occlusion_counting = false;
   Video::SetDirtyValue(s.dirtyStates.pipelineState, s.pipelineState.occlusionCounting,
                 false);

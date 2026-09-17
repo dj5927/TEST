@@ -1,7 +1,12 @@
 // ImGui overlay pixel shader (bindless). reblue_compile_shader passes -all-resources-bound
 // + HV 2021 so the unbounded arrays compile under SM6.0.
+#if defined(REBLUE_DESCRIPTOR_COMPAT)
+Texture2D    gTextures[9] : register(t0, space0);
+SamplerState gSamplers[9] : register(s0, space1);
+#else
 Texture2D    gTextures[] : register(t0, space0);
 SamplerState gSamplers[] : register(s0, space1);
+#endif
 
 // See the vertex shader's Ortho cbuffer for why this needs vk::push_constant (and
 // a struct, not a legacy cbuffer) on Vulkan. dxc gives every stage's

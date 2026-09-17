@@ -31,6 +31,11 @@
 #else
 #include "src/gpu/shaders/hlsl/bd_2d_blit_ps.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/bd_2d_blit_vs.hlsl.spirv.h"
+#if defined(__ANDROID__)
+#include "src/gpu/shaders/hlsl/bd_2d_blit_ps.hlsl.compat.spirv.h"
+#include "src/gpu/shaders/hlsl/bd_2d_blit_ps.hlsl.ubo.spirv.h"
+#include "src/gpu/shaders/hlsl/bd_2d_blit_vs.hlsl.ubo.spirv.h"
+#endif
 #endif
 
 namespace {
@@ -126,6 +131,14 @@ u32 HcgCreateByHlslImpl(bd::gpu::ResourceType type, const void *blob,
 } // namespace
 
 u32 hcgVertexShaderCreateByHlsl_hook() {
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+  if (bd::gpu::state().descriptor_ubo_mode) {
+    return HcgCreateByHlslImpl(
+        bd::gpu::ResourceType::VertexShader,
+        REBLUE_UBO_SHADER_BLOB(bd_2d_blit_vs), &g_blitVs,
+        kHcgVSTableBase, kHcgVSTableEnd);
+  }
+#endif
   const u32 slot = HcgCreateByHlslImpl(
       bd::gpu::ResourceType::VertexShader, REBLUE_SHADER_BLOB(bd_2d_blit_vs),
       &g_blitVs, kHcgVSTableBase, kHcgVSTableEnd);
@@ -133,6 +146,20 @@ u32 hcgVertexShaderCreateByHlsl_hook() {
 }
 
 u32 hcgPixelShaderCreateByHlsl_hook() {
+#if defined(__ANDROID__) && !defined(REBLUE_D3D12)
+  if (bd::gpu::state().descriptor_ubo_mode) {
+    return HcgCreateByHlslImpl(
+        bd::gpu::ResourceType::PixelShader,
+        REBLUE_UBO_SHADER_BLOB(bd_2d_blit_ps), &g_blitPs,
+        kHcgPSTableBase, kHcgPSTableEnd);
+  }
+  if (bd::gpu::state().descriptor_compat_mode) {
+    return HcgCreateByHlslImpl(
+        bd::gpu::ResourceType::PixelShader,
+        REBLUE_COMPAT_SHADER_BLOB(bd_2d_blit_ps), &g_blitPs,
+        kHcgPSTableBase, kHcgPSTableEnd);
+  }
+#endif
   const u32 slot = HcgCreateByHlslImpl(
       bd::gpu::ResourceType::PixelShader, REBLUE_SHADER_BLOB(bd_2d_blit_ps),
       &g_blitPs, kHcgPSTableBase, kHcgPSTableEnd);

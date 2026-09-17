@@ -40,3 +40,19 @@ extern const size_t g_dxilCacheDecompressedSize;
 extern const uint8_t g_compressedSpirvCache[];
 extern const size_t g_spirvCacheCompressedSize;
 extern const size_t g_spirvCacheDecompressedSize;
+
+#if defined(__ANDROID__)
+// Original unbounded-array Vulkan cache linked alongside the compact Android
+// cache. descriptor-indexing capable GPUs use this fast path at runtime.
+extern ShaderCacheEntry g_bindlessShaderCacheEntries[];
+extern const size_t g_bindlessShaderCacheEntryCount;
+extern const uint8_t g_bindlessCompressedSpirvCache[];
+extern const size_t g_bindlessSpirvCacheCompressedSize;
+extern const size_t g_bindlessSpirvCacheDecompressedSize;
+// BDA/Int64-free compact cache for Vulkan 1.1-era mobile drivers.
+extern ShaderCacheEntry g_uboShaderCacheEntries[];
+extern const size_t g_uboShaderCacheEntryCount;
+extern const uint8_t g_uboCompressedSpirvCache[];
+extern const size_t g_uboSpirvCacheCompressedSize;
+extern const size_t g_uboSpirvCacheDecompressedSize;
+#endif

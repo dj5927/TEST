@@ -114,16 +114,20 @@ GuestTexture *BuildBCMirrorCore(const BCMirrorDesc &d,
     }
   }
 
-  const u32 slot = AllocateSlot(s);
-  if (slot == kInvalidDescriptorIndex) {
-    BD_ERROR("{}: bindless heap full", d.caller_name);
-    delete t;
-    return nullptr;
+  if (s.descriptor_compat_mode) {
+    t->descriptorIndex = 0;
+  } else {
+    const u32 slot = AllocateSlot(s);
+    if (slot == kInvalidDescriptorIndex) {
+      BD_ERROR("{}: bindless heap full", d.caller_name);
+      delete t;
+      return nullptr;
+    }
+    s.texture_descriptor_set->setTexture(
+        slot, t->texture, plume::RenderTextureLayout::SHADER_READ,
+        t->textureView.get());
+    t->descriptorIndex = slot;
   }
-  s.texture_descriptor_set->setTexture(slot, t->texture,
-                                       plume::RenderTextureLayout::SHADER_READ,
-                                       t->textureView.get());
-  t->descriptorIndex = slot;
 
   plume::RenderTextureBarrier pre(t->texture,
                                   plume::RenderTextureLayout::COPY_DEST);

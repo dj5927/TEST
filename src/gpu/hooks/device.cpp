@@ -161,6 +161,9 @@ void SeedDeviceRenderState(u32 device_guest) {
 u32 Direct3D_CreateDevice_hook(u32 /*adapter*/, u32 /*deviceType*/,
                                u32 /*focusWindow*/, u32 /*behaviorFlags*/,
                                u32 /*presentParams*/, mapped_u32 outDevice) {
+#if defined(__ANDROID__)
+  bd::AndroidDiag("TRACE guest Direct3D_CreateDevice ENTER");
+#endif
   auto *memory = REX_KERNEL_MEMORY();
   const u32 device_guest = memory->SystemHeapAlloc(kGuestDeviceSize, 0x100);
   memory->Zero(device_guest, kGuestDeviceSize);
@@ -183,6 +186,10 @@ u32 Direct3D_CreateDevice_hook(u32 /*adapter*/, u32 /*deviceType*/,
   if (outDevice) {
     *outDevice = device_guest;
   }
+#if defined(__ANDROID__)
+  bd::AndroidDiag(std::format(
+      "TRACE guest Direct3D_CreateDevice EXIT device=0x{:08X}", device_guest));
+#endif
   return 0;
 }
 
